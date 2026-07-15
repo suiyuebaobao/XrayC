@@ -1,0 +1,15 @@
+services:
+  registry:
+    image: registry:2
+    restart: always
+    volumes: ["/opt/xrayc-registry/data:/var/lib/registry"]
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports: ["80:80", "443:443"]
+    volumes:
+      - /opt/xrayc-registry/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [registry]
+volumes: {caddy_data: {}, caddy_config: {}}

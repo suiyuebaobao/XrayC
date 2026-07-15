@@ -1,0 +1,12 @@
+[package]
+name = "xrayc-xray-config"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[dependencies]
+base64.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2.workspace = true
+thiserror = "1"

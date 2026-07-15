@@ -1,0 +1,31 @@
+{
+  "name": "xrayc-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "element-plus": "^2.10.2",
+    "pinia": "^2.3.1",
+    "qrcode": "^1.5.4",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^22.15.19",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.6",
+    "vue-tsc": "^2.2.10"
+  }
+}

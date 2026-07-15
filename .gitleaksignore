@@ -1,0 +1,37 @@
+# Audited false positives: E2E fixture passwords, deterministic protocol
+# vectors, and historical service identifiers. Each entry is scoped to one
+# commit, path, rule, and line; new findings still fail the gate.
+77503caa93c7c4f7575c0c24ae8268f15b4740bd:frontend/e2e/runtime/phase3-setup.spec.ts:generic-api-key:23
+77503caa93c7c4f7575c0c24ae8268f15b4740bd:frontend/e2e/runtime/phase5-protocols.spec.ts:generic-api-key:24
+de1476904b8313db09a14cc45309ac47295a7543:frontend/e2e/runtime/real-op-phaseR3.spec.ts:generic-api-key:40
+777495e807823ca0beed7fec3c21826301cef229:frontend/e2e/runtime/real-op-phaseC.spec.ts:generic-api-key:29
+39bbda58de201ca32d0c9a539885ad9ab881b8a2:crates/core/src/subscription/cert_sni_tests.rs:generic-api-key:139
+3f140b6f5dbe461304339bb9f03a67ba444b736b:开发方案.md:generic-api-key:192
+001c30e5a592e529f0d74ba896dcf2e6c87994c2:scripts/lib/restore-real-runtime-access-deploy/runtime-assets.sh:generic-api-key:328
+001c30e5a592e529f0d74ba896dcf2e6c87994c2:scripts/lib/restore-real-runtime-access-deploy/runtime-assets.sh:generic-api-key:344
+001c30e5a592e529f0d74ba896dcf2e6c87994c2:scripts/lib/real-access-inbound-matrix/db-prepare.psql:generic-api-key:449
+2f84a9062ef57d1c7acbbf07d762c45a7e6ce0ee:开发方案.md:generic-api-key:191
+9360e23b7ae975c78c487f2a245ae60929498f99:开发方案.md:generic-api-key:182
+9360e23b7ae975c78c487f2a245ae60929498f99:scripts/lib/restore-real-runtime-access-deploy/functions.sh:generic-api-key:283
+9360e23b7ae975c78c487f2a245ae60929498f99:scripts/lib/real-access-inbound-matrix/db-prepare.sh:generic-api-key:476
+ae2929b08e7b3fc6ca73d90ea0121c78fcfac948:开发方案.md:generic-api-key:183
+9b2b6bbe6b8a1084b905d166d37a4e93ed9365e7:开发方案.md:generic-api-key:183
+21a3614cc19d6639e57d5c67b5c9915a81e02463:crates/db/src/tests/part10.rs:generic-api-key:422
+21a3614cc19d6639e57d5c67b5c9915a81e02463:scripts/real-access-inbound-matrix-db-prepare.sh:generic-api-key:335
+21a3614cc19d6639e57d5c67b5c9915a81e02463:开发方案.md:generic-api-key:189
+d7ac21c53946d0e99c90814c06a2c6cb6a752318:开发方案.md:generic-api-key:189
+b6dc277faf8b54cbd0e3e2032efbb0f9eef482cc:开发方案.md:generic-api-key:183
+116d706facb642985e451f99f0acbb00323ba53f:开发方案.md:generic-api-key:182
+
+# Current-tree fingerprints for the same audited fixtures. These keep `gitleaks
+# dir` strict for every other file while allowing the intentional test vectors.
+crates/core/src/subscription/cert_sni_tests.rs:generic-api-key:139
+crates/db/src/tests/part10.rs:generic-api-key:433
+frontend/e2e/runtime/real-op-phaseC.spec.ts:generic-api-key:30
+frontend/e2e/runtime/phase5-protocols.spec.ts:generic-api-key:24
+frontend/e2e/runtime/real-op-phaseR3.spec.ts:generic-api-key:40
+frontend/e2e/runtime/phase3-setup.spec.ts:generic-api-key:23
+scripts/lib/real-access-inbound-matrix/db-prepare.psql:generic-api-key:452
+scripts/lib/restore-real-runtime-access-deploy/runtime-assets.sh:generic-api-key:327
+scripts/lib/restore-real-runtime-access-deploy/runtime-assets.sh:generic-api-key:343
+开发方案.md:generic-api-key:315

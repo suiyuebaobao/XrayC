@@ -1,0 +1,19 @@
+//! 本模块汇总运行时拆分后的测试入口。
+//! 具体用例按配置应用、指标会话、探测和测试支撑拆到子模块，便于
+//! 控制单文件规模，并验证拆分不改变原有行为。
+
+mod config;
+mod config_failure_summary;
+mod config_limiter;
+mod config_split;
+mod core_control;
+mod kernel;
+mod limiter;
+mod metrics_sessions;
+mod node_metrics;
+mod probes;
+mod reboot;
+mod reclaim;
+mod support;
+mod tls;
+mod tls_extra;

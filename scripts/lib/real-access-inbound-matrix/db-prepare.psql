@@ -1,0 +1,564 @@
+BEGIN;
+CREATE TEMP TABLE xrayc_matrix_ctx AS
+SELECT
+  :'token_hash'::text AS token_hash,
+  NULLIF(btrim(:'access_line_id'), '')::uuid AS access_line_id,
+  :'run_id'::text AS run_id,
+  :'protocols'::text AS protocols,
+  NULLIF(btrim(:'listen_host_override'), '') AS listen_host_override,
+  lower(NULLIF(btrim(:'access_node_hint'), '')) AS access_node_hint,
+  NULLIF(btrim(:'preferred_exit_endpoint_id'), '') AS preferred_exit_endpoint_id,
+  NULLIF(btrim(:'third_party_socks_host'), '') AS third_party_socks_host,
+  NULLIF(btrim(:'third_party_socks_port'), '')::integer AS third_party_socks_port,
+  NULLIF(btrim(:'third_party_socks_username'), '') AS third_party_socks_username,
+  NULLIF(:'third_party_socks_password', '') AS third_party_socks_password,
+  :port_base::integer AS port_base;
+CREATE TEMP TABLE xrayc_matrix_protocols AS
+WITH normalized AS (
+  SELECT
+    CASE replace(lower(btrim(protocol)), '-', '_')
+      WHEN 'ss' THEN 'shadowsocks'
+      ELSE replace(lower(btrim(protocol)), '-', '_')
+    END AS matrix_protocol,
+    ordinal::integer AS ordinal
+  FROM regexp_split_to_table((SELECT protocols FROM xrayc_matrix_ctx), ',') WITH ORDINALITY AS t(protocol, ordinal)
+)
+SELECT DISTINCT ON (matrix_protocol)
+  matrix_protocol,
+  matrix_protocol AS protocol,
+  ordinal
+FROM normalized
+WHERE matrix_protocol IN (
+  'vless',
+  'trojan',
+  'shadowsocks'
+)
+ORDER BY matrix_protocol, ordinal;
+CREATE TEMP TABLE xrayc_matrix_direct_access_nodes AS
+SELECT n.id
+FROM access_nodes n
+WHERE NOT (
+  lower(COALESCE(n.name, '')) = 'server_4'
+  OR lower(COALESCE(n.name, '')) ~ '(^|[^a-z0-9_])server_4([^a-z0-9_]|$)'
+  OR lower(concat_ws(' ', n.name, n.public_host, n.remark)) LIKE '%cloudflare%'
+  OR lower(concat_ws(' ', n.name, n.public_host, n.remark)) LIKE '%orange-cloud%'
+  OR lower(concat_ws(' ', n.name, n.public_host, n.remark)) LIKE '%orange cloud%'
+  OR lower(concat_ws(' ', n.name, n.public_host, n.remark)) LIKE '%橙云%'
+);
+CREATE TEMP TABLE xrayc_matrix_active_hint AS
+SELECT EXISTS (
+  SELECT 1
+  FROM access_nodes n
+  JOIN xrayc_matrix_direct_access_nodes dn ON dn.id = n.id
+  CROSS JOIN xrayc_matrix_ctx ctx
+  WHERE ctx.access_node_hint IS NOT NULL
+    AND n.last_heartbeat_at IS NOT NULL
+    AND n.last_heartbeat_at >= now() - interval '120 seconds'
+    AND n.config_dirty = FALSE
+    AND COALESCE(n.config_dirty_reason, '') NOT LIKE 'limiter command failed:%'
+    AND COALESCE(n.desired_config_hash, '') <> ''
+    AND COALESCE(n.applied_config_hash, '') = COALESCE(n.desired_config_hash, '')
+    AND lower(COALESCE(NULLIF(btrim(n.status), ''), 'unknown')) NOT IN ('disabled', 'offline', 'unavailable')
+    AND (
+      lower(n.name) = ctx.access_node_hint
+      OR lower(n.name) LIKE '%' || ctx.access_node_hint
+      OR lower(n.public_host) = ctx.access_node_hint
+    )
+) AS matched;
+CREATE TEMP TABLE xrayc_matrix_created (
+  access_line_id uuid NOT NULL,
+  exit_pool_id uuid NOT NULL,
+  matrix_protocol text NOT NULL,
+  protocol text NOT NULL,
+  listen_port integer NOT NULL
+);
+CREATE TEMP TABLE xrayc_matrix_summary (
+  sort_key integer NOT NULL,
+  line text NOT NULL
+);
+DO $$
+DECLARE
+  ctx record;
+  tmpl record;
+  v_user_id uuid;
+  v_plan_id uuid;
+  v_exit_endpoint_id uuid;
+  v_temp_exit_resource_id uuid;
+  v_line_group_id uuid;
+  v_temp_exit_pool_id uuid;
+  item record;
+  v_candidate integer;
+  v_port integer;
+  v_line_id uuid;
+  v_created_count integer := 0;
+BEGIN
+  SELECT * INTO STRICT ctx FROM xrayc_matrix_ctx;
+  SELECT t.user_id, s.plan_id
+  INTO v_user_id, v_plan_id
+  FROM subscription_tokens t
+  JOIN users u ON u.id = t.user_id
+  JOIN user_subscriptions s ON s.user_id = t.user_id
+  WHERE t.token_hash = ctx.token_hash
+    AND t.revoked_at IS NULL
+    AND t.expires_at > now()
+    AND u.disabled = FALSE
+    AND s.active = TRUE
+    AND s.expires_at > now()
+    AND s.limit_bytes > s.used_bytes
+  LIMIT 1;
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'active subscription token was not found';
+  END IF;
+
+  SELECT l.id, l.name, l.access_node_id, l.exit_endpoint_id, l.exit_pool_id,
+         COALESCE(ctx.listen_host_override, NULLIF(btrim(n.public_host), ''), l.listen_host) AS listen_host,
+         l.listen_port, l.region_code, l.region_name, l.region_flag
+  INTO tmpl
+  FROM access_lines l
+  JOIN access_nodes n ON n.id = l.access_node_id
+  JOIN xrayc_matrix_direct_access_nodes dn ON dn.id = n.id
+  WHERE ctx.access_line_id IS NOT NULL
+    AND l.id = ctx.access_line_id
+    AND l.enabled = TRUE
+    AND n.last_heartbeat_at IS NOT NULL
+    AND n.last_heartbeat_at >= now() - interval '120 seconds'
+    AND n.config_dirty = FALSE
+    AND COALESCE(n.config_dirty_reason, '') NOT LIKE 'limiter command failed:%'
+    AND COALESCE(n.desired_config_hash, '') <> ''
+    AND COALESCE(n.applied_config_hash, '') = COALESCE(n.desired_config_hash, '')
+    AND lower(COALESCE(NULLIF(btrim(n.status), ''), 'unknown')) NOT IN ('disabled', 'offline', 'unavailable')
+    AND (
+      ctx.access_node_hint IS NULL
+      OR NOT (SELECT matched FROM xrayc_matrix_active_hint)
+      OR lower(n.name) = ctx.access_node_hint
+      OR lower(n.name) LIKE '%' || ctx.access_node_hint
+      OR lower(n.public_host) = ctx.access_node_hint
+    );
+  IF tmpl.id IS NULL THEN
+    SELECT l.id, l.name, l.access_node_id, l.exit_endpoint_id, l.exit_pool_id,
+           COALESCE(ctx.listen_host_override, NULLIF(btrim(n.public_host), ''), l.listen_host) AS listen_host,
+           l.listen_port, l.region_code, l.region_name, l.region_flag
+    INTO tmpl
+    FROM access_lines l
+    JOIN access_nodes n ON n.id = l.access_node_id
+    JOIN xrayc_matrix_direct_access_nodes dn ON dn.id = n.id
+    JOIN exit_pools ep ON ep.id = l.exit_pool_id
+    WHERE l.enabled = TRUE
+      AND lower(COALESCE(NULLIF(btrim(n.status), ''), 'unknown')) NOT IN ('disabled', 'offline', 'unavailable')
+      AND n.last_heartbeat_at IS NOT NULL
+      AND n.last_heartbeat_at >= now() - interval '120 seconds'
+      AND n.config_dirty = FALSE
+      AND COALESCE(n.config_dirty_reason, '') NOT LIKE 'limiter command failed:%'
+      AND COALESCE(n.desired_config_hash, '') <> ''
+      AND COALESCE(n.applied_config_hash, '') = COALESCE(n.desired_config_hash, '')
+      AND ep.enabled = TRUE
+      AND (
+        ctx.access_node_hint IS NULL
+        OR NOT (SELECT matched FROM xrayc_matrix_active_hint)
+        OR lower(n.name) = ctx.access_node_hint
+        OR lower(n.name) LIKE '%' || ctx.access_node_hint
+        OR lower(n.public_host) = ctx.access_node_hint
+      )
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM user_access_line_assignments ula
+          WHERE ula.user_id = v_user_id
+            AND ula.access_line_id = l.id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM plan_line_groups plg
+          WHERE plg.plan_id = v_plan_id
+            AND (
+              (
+                l.exit_endpoint_id IS NOT NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM line_group_exit_endpoints lgee
+                  WHERE lgee.line_group_id = plg.line_group_id
+                    AND lgee.exit_endpoint_id = l.exit_endpoint_id
+                )
+              )
+              OR (
+                l.exit_endpoint_id IS NULL
+                AND plg.line_group_id = l.line_group_id
+              )
+            )
+        )
+      )
+      AND EXISTS (
+        SELECT 1
+        FROM exit_pool_members m
+        JOIN exit_endpoints e ON e.id = m.exit_endpoint_id
+        JOIN exit_resources r ON r.id = e.exit_resource_id
+        LEFT JOIN access_exit_probe_states ps
+          ON ps.access_node_id = l.access_node_id
+         AND ps.exit_endpoint_id = e.id
+        WHERE m.exit_pool_id = l.exit_pool_id
+          AND (l.exit_endpoint_id IS NULL OR m.exit_endpoint_id = l.exit_endpoint_id)
+          AND m.status = 'healthy'
+          AND m.allow_new_assignments = TRUE
+          AND COALESCE(ps.effective_status, 'healthy') <> 'offline'
+          AND e.enabled = TRUE
+          AND e.last_probe_status = 'healthy'
+          AND r.enabled = TRUE
+          AND r.status = 'healthy'
+          AND e.outbound_type::text IN ('socks', 'http', 'vless', 'trojan', 'shadowsocks', 'hysteria')
+      )
+    ORDER BY
+      CASE
+        WHEN ctx.access_node_hint IS NOT NULL
+         AND (lower(n.name) = ctx.access_node_hint OR lower(n.name) LIKE '%' || ctx.access_node_hint)
+        THEN 1 ELSE 0
+      END DESC,
+      EXISTS (
+        SELECT 1
+        FROM user_access_line_assignments ula
+        WHERE ula.user_id = v_user_id
+          AND ula.access_line_id = l.id
+      ) DESC,
+      l.visibility_weight DESC,
+      l.name ASC,
+      l.listen_port ASC,
+      l.id ASC
+    LIMIT 1;
+  END IF;
+  IF tmpl.access_node_id IS NULL THEN
+    SELECT NULL::uuid AS id,
+           n.name,
+           n.id AS access_node_id,
+           NULL::uuid AS exit_endpoint_id,
+           NULL::uuid AS exit_pool_id,
+           COALESCE(ctx.listen_host_override, NULLIF(btrim(n.public_host), '')) AS listen_host,
+           0::integer AS listen_port,
+           'E2E'::text AS region_code,
+           'real inbound matrix'::text AS region_name,
+           ''::text AS region_flag
+    INTO tmpl
+    FROM access_nodes n
+    JOIN xrayc_matrix_direct_access_nodes dn ON dn.id = n.id
+    WHERE n.last_heartbeat_at IS NOT NULL
+      AND n.last_heartbeat_at >= now() - interval '120 seconds'
+      AND n.config_dirty = FALSE
+      AND COALESCE(n.config_dirty_reason, '') NOT LIKE 'limiter command failed:%'
+      AND COALESCE(n.desired_config_hash, '') <> ''
+      AND COALESCE(n.applied_config_hash, '') = COALESCE(n.desired_config_hash, '')
+      AND lower(COALESCE(NULLIF(btrim(n.status), ''), 'unknown')) NOT IN ('disabled', 'offline', 'unavailable')
+      AND COALESCE(ctx.listen_host_override, NULLIF(btrim(n.public_host), '')) IS NOT NULL
+      AND (
+        ctx.access_node_hint IS NULL
+        OR NOT (SELECT matched FROM xrayc_matrix_active_hint)
+        OR lower(n.name) = ctx.access_node_hint
+        OR lower(n.name) LIKE '%' || ctx.access_node_hint
+        OR lower(n.public_host) = ctx.access_node_hint
+      )
+    ORDER BY
+      CASE
+        WHEN ctx.access_node_hint IS NOT NULL
+         AND (lower(n.name) = ctx.access_node_hint OR lower(n.name) LIKE '%' || ctx.access_node_hint)
+        THEN 1 ELSE 0
+      END DESC,
+      n.name ASC,
+      n.id ASC
+    LIMIT 1;
+  END IF;
+  IF tmpl.access_node_id IS NULL THEN
+    RAISE EXCEPTION 'template access line is not available';
+  END IF;
+  IF EXISTS (SELECT 1 FROM xrayc_matrix_protocols WHERE protocol IN ('trojan', 'hysteria'))
+     AND tmpl.listen_host ~ '^[0-9]+(\.[0-9]+){3}$' THEN
+    RAISE EXCEPTION 'TLS inbound matrix requires a TLS domain listen host';
+  END IF;
+  IF ctx.third_party_socks_host IS NOT NULL AND ctx.third_party_socks_port IS NOT NULL THEN
+    INSERT INTO exit_resources (
+      name, region_code, provider_name, ownership, status,
+      last_probe_status, enabled
+    )
+    VALUES (
+      'real-inbound-matrix-' || ctx.run_id || '-socks-resource',
+      'E2E',
+      'real-inbound-matrix',
+      'third_party',
+      'healthy',
+      'unknown',
+      TRUE
+    )
+    RETURNING id INTO v_temp_exit_resource_id;
+    INSERT INTO exit_endpoints (
+      exit_resource_id, name, outbound_type, host, port,
+      outbound_config, stream_config, probe_config, last_probe_status, enabled
+    )
+    VALUES (
+      v_temp_exit_resource_id,
+      'real-inbound-matrix-' || ctx.run_id || '-socks-endpoint',
+      'socks'::endpoint_type,
+      ctx.third_party_socks_host,
+      ctx.third_party_socks_port,
+      CASE
+        WHEN ctx.third_party_socks_username IS NULL AND ctx.third_party_socks_password IS NULL
+        THEN '{}'::jsonb
+        ELSE jsonb_build_object(
+          'username', ctx.third_party_socks_username,
+          'password', ctx.third_party_socks_password
+        )
+      END,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      'unknown',
+      TRUE
+    )
+    RETURNING id INTO v_exit_endpoint_id;
+  END IF;
+  IF v_exit_endpoint_id IS NULL AND ctx.preferred_exit_endpoint_id IS NOT NULL THEN
+    SELECT e.id
+    INTO v_exit_endpoint_id
+    FROM exit_endpoints e
+    JOIN exit_resources r ON r.id = e.exit_resource_id
+    LEFT JOIN access_exit_probe_states preferred_ps
+      ON preferred_ps.access_node_id = tmpl.access_node_id
+     AND preferred_ps.exit_endpoint_id = e.id
+    WHERE e.id = ctx.preferred_exit_endpoint_id::uuid
+      AND e.enabled = TRUE
+      AND r.enabled = TRUE
+      AND COALESCE(preferred_ps.effective_status, 'healthy') <> 'offline'
+      AND e.last_probe_status = 'healthy'
+      AND r.status = 'healthy'
+      AND e.outbound_type::text IN ('socks', 'http', 'vless', 'trojan', 'shadowsocks', 'hysteria')
+    LIMIT 1;
+  END IF;
+  IF v_exit_endpoint_id IS NULL AND tmpl.exit_endpoint_id IS NOT NULL THEN
+    SELECT e.id
+    INTO v_exit_endpoint_id
+    FROM exit_endpoints e
+    JOIN exit_resources r ON r.id = e.exit_resource_id
+    LEFT JOIN access_exit_probe_states template_ps
+      ON template_ps.access_node_id = tmpl.access_node_id
+     AND template_ps.exit_endpoint_id = e.id
+    WHERE e.id = tmpl.exit_endpoint_id
+      AND e.enabled = TRUE
+      AND r.enabled = TRUE
+      AND COALESCE(template_ps.effective_status, 'healthy') <> 'offline'
+      AND e.last_probe_status = 'healthy'
+      AND r.status = 'healthy'
+      AND e.outbound_type::text IN ('socks', 'http', 'vless', 'trojan', 'shadowsocks', 'hysteria')
+    LIMIT 1;
+  END IF;
+  IF v_exit_endpoint_id IS NULL THEN
+    SELECT e.id
+    INTO v_exit_endpoint_id
+    FROM exit_pool_members m
+    JOIN exit_pools p ON p.id = m.exit_pool_id
+    JOIN exit_endpoints e ON e.id = m.exit_endpoint_id
+    JOIN exit_resources r ON r.id = e.exit_resource_id
+    LEFT JOIN user_exit_assignments uea
+      ON uea.user_id = v_user_id
+     AND uea.access_line_id = tmpl.id
+     AND uea.exit_pool_id = tmpl.exit_pool_id
+     AND uea.exit_endpoint_id = e.id
+    LEFT JOIN access_exit_probe_states ps
+      ON ps.access_node_id = tmpl.access_node_id
+     AND ps.exit_endpoint_id = e.id
+    WHERE (tmpl.exit_pool_id IS NULL OR m.exit_pool_id = tmpl.exit_pool_id)
+      AND (tmpl.exit_endpoint_id IS NULL OR m.exit_endpoint_id = tmpl.exit_endpoint_id)
+      AND p.enabled = TRUE
+      AND m.status = 'healthy'
+      AND m.allow_new_assignments = TRUE
+      AND COALESCE(ps.effective_status, 'healthy') <> 'offline'
+      AND e.enabled = TRUE
+      AND e.last_probe_status = 'healthy'
+      AND r.enabled = TRUE
+      AND r.status = 'healthy'
+      AND e.outbound_type::text IN ('socks', 'http', 'vless', 'trojan', 'shadowsocks', 'hysteria')
+    ORDER BY
+      (tmpl.exit_pool_id IS NOT NULL AND m.exit_pool_id = tmpl.exit_pool_id) DESC,
+      (uea.exit_endpoint_id IS NOT NULL) DESC,
+      m.priority DESC,
+      m.weight DESC,
+      e.id ASC
+    LIMIT 1;
+  END IF;
+  IF v_exit_endpoint_id IS NULL THEN
+    RAISE EXCEPTION 'no healthy exit endpoint is available for template access line';
+  END IF;
+  INSERT INTO line_groups (name, enabled)
+  VALUES ('real-inbound-matrix-' || ctx.run_id, TRUE)
+  RETURNING id INTO v_line_group_id;
+  INSERT INTO plan_line_groups (plan_id, line_group_id, billing_multiplier)
+  VALUES (v_plan_id, v_line_group_id, 1.000);
+  FOR item IN
+    SELECT matrix_protocol, protocol, ordinal
+    FROM xrayc_matrix_protocols
+    ORDER BY ordinal
+  LOOP
+    v_port := NULL;
+    FOR v_candidate IN 0..65535 LOOP
+      v_port := 1 + ((ctx.port_base + item.ordinal - 2 + v_candidate) % 65535);
+      CONTINUE WHEN v_port < 1024;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM access_lines l
+        WHERE l.access_node_id = tmpl.access_node_id
+          AND l.listen_host = tmpl.listen_host
+          AND l.listen_port = v_port
+      ) AND NOT EXISTS (
+        SELECT 1 FROM xrayc_matrix_created c WHERE c.listen_port = v_port
+      ) THEN
+        EXIT;
+      END IF;
+      v_port := NULL;
+    END LOOP;
+    IF v_port IS NULL THEN
+      RAISE EXCEPTION 'no temporary listen port is available';
+    END IF;
+    INSERT INTO exit_pools (name, region_code, strategy, enabled)
+    VALUES ('real-inbound-matrix-' || ctx.run_id || '-' || item.protocol, COALESCE(NULLIF(tmpl.region_code, ''), 'E2E'), 'priority', TRUE)
+    RETURNING id INTO v_temp_exit_pool_id;
+    INSERT INTO exit_pool_members (exit_pool_id, exit_endpoint_id, weight, status, priority, allow_new_assignments)
+    VALUES (v_temp_exit_pool_id, v_exit_endpoint_id, 100, 'healthy', 100, TRUE);
+    INSERT INTO access_lines (
+      name, access_node_id, line_group_id, exit_endpoint_id, exit_pool_id, listen_host, listen_port,
+      protocol, transport, user_uuid, server_name, public_key, short_id,
+      enabled, region_code, region_name, region_flag,
+      flow, udp_enabled, xhttp_path, xhttp_host, xhttp_mode,
+      identity_mode, user_key_source, inbound_config, visibility_weight
+    )
+    VALUES (
+      'real-inbound-matrix-' || ctx.run_id || '-' || item.matrix_protocol,
+      tmpl.access_node_id,
+      v_line_group_id,
+      v_exit_endpoint_id,
+      v_temp_exit_pool_id,
+      tmpl.listen_host,
+      v_port,
+      item.protocol,
+      CASE WHEN item.protocol = 'hysteria' THEN 'hysteria' ELSE 'tcp' END,
+      gen_random_uuid()::text,
+	      CASE WHEN item.protocol IN ('trojan', 'hysteria') THEN tmpl.listen_host ELSE '' END,
+      '',
+      '',
+      TRUE,
+      COALESCE(NULLIF(tmpl.region_code, ''), 'E2E'),
+	      COALESCE(NULLIF(tmpl.region_name, ''), 'real inbound matrix'),
+	      tmpl.region_flag,
+	      '',
+	      TRUE,
+	      '',
+	      '',
+	      'stream-one',
+      'credential',
+      'xray_email',
+	      CASE
+	        WHEN item.protocol = 'shadowsocks' THEN jsonb_build_object('method', '2022-blake3-aes-128-gcm', 'password', 'MDEyMzQ1Njc4OWFiY2RlZg==')
+	        WHEN item.protocol IN ('trojan', 'hysteria') THEN jsonb_build_object(
+	          'security', 'tls',
+	          'server_name', tmpl.listen_host,
+	          'certificate_file', '/etc/letsencrypt/live/' || tmpl.listen_host || '/fullchain.pem',
+	          'key_file', '/etc/letsencrypt/live/' || tmpl.listen_host || '/privkey.pem'
+	        )
+	        ELSE '{}'::jsonb
+	      END,
+      100000
+    )
+    RETURNING id INTO v_line_id;
+    INSERT INTO xrayc_matrix_created (access_line_id, exit_pool_id, matrix_protocol, protocol, listen_port)
+    VALUES (v_line_id, v_temp_exit_pool_id, item.matrix_protocol, item.protocol, v_port);
+    INSERT INTO access_entries (
+      id, access_node_id, name, listen_host, listen_port, protocol, transport,
+      security, user_uuid, server_name, public_key, short_id, flow, udp_enabled,
+      udp_packet_encoding, xhttp_path, xhttp_host, xhttp_mode, inbound_config,
+      enabled, sort_weight
+    )
+    SELECT
+      id, access_node_id, name, listen_host, listen_port, protocol, transport,
+      COALESCE(NULLIF(inbound_config->>'security', ''), ''),
+      user_uuid, server_name, public_key, short_id, flow, udp_enabled,
+      udp_packet_encoding, xhttp_path, xhttp_host, xhttp_mode, inbound_config,
+      enabled, visibility_weight
+    FROM access_lines
+    WHERE id = v_line_id
+    ON CONFLICT (id) DO UPDATE SET
+      access_node_id = EXCLUDED.access_node_id,
+      name = EXCLUDED.name,
+      listen_host = EXCLUDED.listen_host,
+      listen_port = EXCLUDED.listen_port,
+      protocol = EXCLUDED.protocol,
+      transport = EXCLUDED.transport,
+      security = EXCLUDED.security,
+      user_uuid = EXCLUDED.user_uuid,
+      server_name = EXCLUDED.server_name,
+      public_key = EXCLUDED.public_key,
+      short_id = EXCLUDED.short_id,
+      flow = EXCLUDED.flow,
+      udp_enabled = EXCLUDED.udp_enabled,
+      udp_packet_encoding = EXCLUDED.udp_packet_encoding,
+      xhttp_path = EXCLUDED.xhttp_path,
+      xhttp_host = EXCLUDED.xhttp_host,
+      xhttp_mode = EXCLUDED.xhttp_mode,
+      inbound_config = EXCLUDED.inbound_config,
+      enabled = EXCLUDED.enabled,
+      sort_weight = EXCLUDED.sort_weight,
+      updated_at = now();
+    INSERT INTO access_entry_exit_bindings (
+      id, access_entry_id, exit_endpoint_id, exit_pool_id, name, enabled, sort_weight
+    )
+    SELECT id, id, exit_endpoint_id, exit_pool_id, name, enabled, visibility_weight
+    FROM access_lines
+    WHERE id = v_line_id AND exit_endpoint_id IS NOT NULL
+    ON CONFLICT (id) DO UPDATE SET
+      access_entry_id = EXCLUDED.access_entry_id,
+      exit_endpoint_id = EXCLUDED.exit_endpoint_id,
+      exit_pool_id = EXCLUDED.exit_pool_id,
+      name = EXCLUDED.name,
+      enabled = EXCLUDED.enabled,
+      sort_weight = EXCLUDED.sort_weight,
+      updated_at = now();
+    INSERT INTO line_group_binding_nodes (
+      line_group_id, entry_exit_binding_id, position
+    )
+    VALUES (v_line_group_id, v_line_id, 100 + item.ordinal)
+    ON CONFLICT (line_group_id, entry_exit_binding_id) DO NOTHING;
+    INSERT INTO line_group_exit_endpoints (line_group_id, exit_endpoint_id)
+    VALUES (v_line_group_id, v_exit_endpoint_id)
+    ON CONFLICT (line_group_id, exit_endpoint_id) DO NOTHING;
+    INSERT INTO user_access_line_assignments (user_id, line_group_id, access_line_id)
+    VALUES (v_user_id, v_line_group_id, v_line_id)
+    ON CONFLICT (user_id, line_group_id, access_line_id) DO NOTHING;
+    INSERT INTO user_exit_assignments (
+      user_id, access_line_id, exit_pool_id, exit_endpoint_id, failover_reason
+    )
+    VALUES (
+      v_user_id, v_line_id, v_temp_exit_pool_id, v_exit_endpoint_id, 'real_inbound_matrix_e2e'
+    )
+    ON CONFLICT (user_id, access_line_id, exit_pool_id) DO UPDATE SET
+      exit_endpoint_id = EXCLUDED.exit_endpoint_id,
+      assigned_at = now(),
+      failover_reason = EXCLUDED.failover_reason;
+    v_created_count := v_created_count + 1;
+  END LOOP;
+  UPDATE access_nodes
+  SET config_dirty = TRUE,
+      config_dirty_at = now(),
+      desired_config_hash = NULL,
+      config_dirty_reason = 'real_inbound_matrix_e2e_prepare'
+  WHERE id = tmpl.access_node_id;
+  INSERT INTO xrayc_matrix_summary (sort_key, line)
+  VALUES
+    (10, 'RUN_ID=' || ctx.run_id),
+    (20, 'LINE_GROUP_ID=' || v_line_group_id),
+    (30, 'ACCESS_NODE_ID=' || tmpl.access_node_id),
+    (40, 'EXIT_ENDPOINT_ID=' || v_exit_endpoint_id),
+    (50, 'CREATED_COUNT=' || v_created_count);
+END $$;
+COMMIT;
+SELECT line FROM xrayc_matrix_summary
+UNION ALL
+SELECT 'CREATED_' || upper(matrix_protocol) || '=' || access_line_id
+FROM xrayc_matrix_created
+UNION ALL
+SELECT 'POOL_' || upper(matrix_protocol) || '=' || exit_pool_id
+FROM xrayc_matrix_created
+UNION ALL
+SELECT 'PORT_' || upper(matrix_protocol) || '=' || listen_port::text
+FROM xrayc_matrix_created
+ORDER BY 1;

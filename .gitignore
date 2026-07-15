@@ -1,0 +1,75 @@
+# Dependencies
+frontend/node_modules/
+
+# Frontend build/cache
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+
+# Rust build/cache
+target/
+
+# Local environment and secrets
+AGENTS.md
+AGENTS.local.md
+.env
+.env.*
+env
+.envrc
+!.env.example
+!.env.real-release.example
+real-e2e-inventory.*
+*.inventory.private.*
+*.private.md
+*.secrets.md
+*账号密码*.txt
+服务器账号密码.txt
+secrets/
+# 只忽略仓库根的数据库备份输出目录(compose 卷 ./backups:/backups),
+# 用前导斜杠锚定到根,避免误伤源码目录 crates/worker/src/backups/。
+/backups/
+# 数据库备份管理运行时目录(compose 卷):WAL 归档、base 备份仓库、异地同步 SSH 私钥。
+/wal-archive/
+/wal-repo/
+/backup-ssh/
+文档/私有/
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+__pycache__/
+*.pyc
+coverage/
+deploy/artifacts/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# 本地 agent 规则文件，保留在本地不入库（与 AGENTS.md 一致）
+CLAUDE.md
+
+# Docker 构建用 CARGO_HOME / 构建产物缓存(非源码,绝不提交)
+.cargo-docker/
+.output/
+
+# 仓库内临时草稿/诊断转储(子 agent 产物,绝不提交)
+/scratchpad/
+
+# Private project documentation (never publish)
+/docs/
+/文档/
+*.[mM][dD]
+*.mdx
+*.rst
+*.adoc
+*.txt
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx

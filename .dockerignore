@@ -1,0 +1,45 @@
+# Rust build cache
+target/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/test-results/
+frontend/playwright-report/
+frontend/tsconfig.tsbuildinfo
+
+# Git metadata
+.git/
+
+# Local environment, private credentials, and key material
+AGENTS.md
+AGENTS.local.md
+.env
+.env.*
+env
+.envrc
+!.env.example
+!.env.real-release.example
+real-e2e-inventory.*
+*.inventory.private.*
+*.private.md
+*.secrets.md
+*账号密码*.txt
+服务器账号密码.txt
+secrets/
+文档/私有/
+
+# Logs, temporary directories, and deployment artifacts
+*.log
+logs/
+tmp/
+coverage/
+backups/
+*.dump
+deploy/artifacts/
+
+# Editor and system files
+.DS_Store
+.idea/
+.vscode/

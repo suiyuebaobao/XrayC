@@ -1,0 +1,41 @@
+services:
+  worker:
+    image: ${XRAYC_REGISTRY}/xrayc/rust-app:trial
+    restart: always
+    command: ["xrayc-worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MIGRATIONS_DIR: migrations
+      XRAYC_ENV: production
+    healthcheck:
+      test: ["CMD-SHELL", "tr '\\0' ' ' </proc/1/cmdline | grep -q xrayc-worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  api:
+    image: ${XRAYC_REGISTRY}/xrayc/rust-app:trial
+    restart: always
+    command: ["xrayc-api"]
+    depends_on: [worker]
+    ports: ["${BACKEND_PORT:-8000}:3000"]
+    environment:
+      API_BIND: 0.0.0.0:3000
+      DATABASE_URL: ${DATABASE_URL}
+      XRAYC_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      XRAYC_REFRESH_COOKIE_SECURE: "true"
+      XRAYC_PUBLIC_BASE_URL: ${XRAYC_PUBLIC_BASE_URL}
+      SEED_DEMO_DATA: "false"
+      XRAYC_BOOTSTRAP_ADMIN_PASSWORD: ${XRAYC_BOOTSTRAP_ADMIN_PASSWORD}
+      # 监控中心平台指标:磁盘占用读宿主 FS 根(下方 / 只读挂到 /hostfs);/proc 容器内即宿主不挂。
+      XRAYC_HOST_FS_ROOT: /hostfs
+    volumes:
+      # 只读挂宿主根目录,供平台指标 statvfs 读真实宿主磁盘占用(只读、不可写)。
+      - "/:/hostfs:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

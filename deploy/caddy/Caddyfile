@@ -1,0 +1,34 @@
+{
+    admin off
+}
+
+{$CADDY_SITE_ADDRESS::80} {
+    encode zstd gzip
+
+    handle /api/deploy/artifacts/* {
+        reverse_proxy {$XRAYC_API_UPSTREAM:api:3000} {
+            transport http {
+                dial_timeout 60s
+                response_header_timeout 900s
+            }
+        }
+    }
+
+    handle /api/* {
+        reverse_proxy {$XRAYC_API_UPSTREAM:api:3000}
+    }
+
+    handle /sub/* {
+        reverse_proxy {$XRAYC_API_UPSTREAM:api:3000}
+    }
+
+    handle /health {
+        reverse_proxy {$XRAYC_API_UPSTREAM:api:3000}
+    }
+
+    handle {
+        root * /srv/xrayc/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}

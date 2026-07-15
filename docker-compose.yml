@@ -1,0 +1,146 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # 数据库备份管理·WAL 归档(archive_mode 需重启生效;archive_command 只写本地卷、永不等网络、防爆盘)
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - "archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f"
+      - -c
+      - max_wal_senders=10
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-xrayc}
+      POSTGRES_USER: ${POSTGRES_USER:-xrayc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./wal-archive:/var/lib/postgresql/wal-archive
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: xrayc/rust-app:local
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    command: ["xrayc-api"]
+    environment:
+      API_BIND: ${API_BIND:-0.0.0.0:3000}
+      DATABASE_URL: ${DATABASE_URL:-postgres://xrayc:change-me@postgres:5432/xrayc}
+      XRAYC_ENV: ${XRAYC_ENV:-development}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-}
+      XRAYC_REFRESH_COOKIE_SECURE: ${XRAYC_REFRESH_COOKIE_SECURE:-}
+      XRAYC_PUBLIC_BASE_URL: ${XRAYC_PUBLIC_BASE_URL:-}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      DEPLOY_ARTIFACT_DIR: ${DEPLOY_ARTIFACT_DIR:-/root/xrayc-artifacts}
+      DEPLOY_ARTIFACT_TOKEN: ${DEPLOY_ARTIFACT_TOKEN:-}
+      XRAYC_PAYMENT_ENABLED: ${XRAYC_PAYMENT_ENABLED:-false}
+      PAYMENT_CALLBACK_SECRET: ${PAYMENT_CALLBACK_SECRET:-}
+      PAYMENT_MIN_CONFIRMATIONS: ${PAYMENT_MIN_CONFIRMATIONS:-1}
+      PAYMENT_RECEIVE_ADDRESS: ${PAYMENT_RECEIVE_ADDRESS:-xrayc-demo-payment-address}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+      ALIPAY_APP_PRIVATE_KEY: ${ALIPAY_APP_PRIVATE_KEY:-}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+      ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
+      RUST_LOG: ${RUST_LOG:-xrayc_api=info,tower_http=info}
+      # 监控中心平台指标:磁盘占用读宿主 FS 根(下方 / 只读挂到 /hostfs);/proc 容器内即宿主不挂。
+      XRAYC_HOST_FS_ROOT: /hostfs
+      # 数据库备份管理:test-and-provision 装公钥用的 SSH 私钥目录(与 worker 共享同一卷)
+      XRAYC_BACKUP_SSH_KEY_DIR: ${XRAYC_BACKUP_SSH_KEY_DIR:-/var/lib/xrayc/backup_ssh}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./deploy/artifacts:/root/xrayc-artifacts:ro
+      # 只读挂宿主根目录,供平台指标 statvfs 读真实宿主磁盘占用(只读、不可写)。
+      - /:/hostfs:ro
+      # 数据库备份管理:与 worker 共享的 SSH 私钥卷(test-and-provision 生成/装公钥)
+      - ./backup-ssh:/var/lib/xrayc/backup_ssh
+
+  worker:
+    image: xrayc/rust-app:local
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    command: ["xrayc-worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://xrayc:change-me@postgres:5432/xrayc}
+      XRAYC_ENV: ${XRAYC_ENV:-development}
+      MIGRATIONS_DIR: ${MIGRATIONS_DIR:-migrations}
+      RUST_LOG: ${RUST_LOG:-xrayc_worker=info}
+      WORKER_TICK_SECONDS: ${WORKER_TICK_SECONDS:-60}
+      WORKER_RUNTIME_RETENTION_DAYS: ${WORKER_RUNTIME_RETENTION_DAYS:-14}
+      DATABASE_BACKUP_DIR: ${DATABASE_BACKUP_DIR:-/backups}
+      DATABASE_BACKUP_TIMEOUT_SECONDS: ${DATABASE_BACKUP_TIMEOUT_SECONDS:-1800}
+      DATABASE_BACKUP_RETRY_SECONDS: ${DATABASE_BACKUP_RETRY_SECONDS:-3600}
+      # 数据库备份管理:异地同步 SSH 私钥目录、WAL 归档与 base 备份目录(见 docs/superpowers/specs/2026-07-01-*)
+      XRAYC_BACKUP_SSH_KEY_DIR: ${XRAYC_BACKUP_SSH_KEY_DIR:-/var/lib/xrayc/backup_ssh}
+      XRAYC_WAL_ARCHIVE_DIR: ${XRAYC_WAL_ARCHIVE_DIR:-/wal-archive}
+      XRAYC_WAL_REPO_DIR: ${XRAYC_WAL_REPO_DIR:-/wal-repo}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "tr '\\0' ' ' </proc/1/cmdline | grep -q xrayc-worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./backups:/backups
+      - ./wal-archive:/wal-archive
+      - ./wal-repo:/wal-repo
+      - ./backup-ssh:/var/lib/xrayc/backup_ssh
+
+  caddy:
+    image: xrayc/caddy:local
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: deploy/caddy/Dockerfile
+      network: host
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+    ports:
+      - "${PUBLIC_HTTP_PORT:-80}:80"
+      - "${HTTP_PORT:-8080}:80"
+      - "${HTTPS_PORT:-443}:443"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
