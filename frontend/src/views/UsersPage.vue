@@ -5,7 +5,7 @@
   真实订阅地址只从后端返回，页面不拼接出口上游信息。
 -->
 <script setup lang="ts">
-import { CopyDocument, Delete, Edit, Lock, Plus, Refresh, RefreshRight, Search, View } from '@element-plus/icons-vue';
+import { CopyDocument, Delete, Edit, Lock, Plus, Refresh, RefreshRight, Search, View, MoreFilled } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, onMounted, reactive, ref } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
@@ -301,6 +301,7 @@ function totalTraffic(user: Pick<AdminUser, 'trafficGb'>) {
 }
 
 function formatGb(value: number) {
+  if (value === -1) return '不限流量';
   return `${Number(value.toFixed(value >= 10 ? 0 : 2))} GB`;
 }
 
@@ -447,14 +448,19 @@ function errorText(error: unknown, fallback: string) {
           {{ formatDate(row.createdAt) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="380" fixed="right">
+      <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }: { row: AdminUser }">
           <el-button :icon="Edit" text type="primary" @click="openEdit(row)">编辑用户</el-button>
           <el-button :icon="View" text type="primary" @click="openSubscription(row)">订阅</el-button>
-          <el-button text type="primary" @click="openTrafficLogs(row)">流量日志</el-button>
-          <el-button text type="primary" @click="openDevices(row)">设备管理</el-button>
-          <el-button :icon="Lock" text type="warning" @click="openResetPassword(row)">重置密码</el-button>
-          <el-button :icon="Delete" text type="danger" @click="deleteUser(row)">删除</el-button>
+          <el-dropdown trigger="click" placement="bottom-end">
+            <el-button text aria-label="更多用户操作"><el-icon><MoreFilled /></el-icon></el-button>
+            <template #dropdown><el-dropdown-menu>
+              <el-dropdown-item @click="openTrafficLogs(row)">流量日志</el-dropdown-item>
+              <el-dropdown-item @click="openDevices(row)">访问 IP</el-dropdown-item>
+              <el-dropdown-item :icon="Lock" divided @click="openResetPassword(row)">重置密码</el-dropdown-item>
+              <el-dropdown-item :icon="Delete" @click="deleteUser(row)">删除用户</el-dropdown-item>
+            </el-dropdown-menu></template>
+          </el-dropdown>
         </template>
       </el-table-column>
       <template #empty>

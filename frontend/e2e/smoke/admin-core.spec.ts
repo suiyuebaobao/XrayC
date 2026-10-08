@@ -1,3 +1,4 @@
+import { expectAdminWorkspaces, openNodeOnboarding } from '../helpers/node-onboarding';
 // 用途：覆盖管理员登录后的概览、中转节点、分组和后台页面 smoke 流程。
 import { expect, test } from '@playwright/test';
 
@@ -163,20 +164,10 @@ test('管理员可以登录并查看概览、中转节点和分组', async ({ pa
   await page.goto('/overview');
 
   await expect(page).toHaveURL(/\/overview$/);
-  await expect(page.getByRole('heading', { name: '概览' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '总览' })).toBeVisible();
   await expect(page.getByText('活跃用户')).toBeVisible();
-  await expect(page.getByText('可用线路')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('中转节点')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('分组')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('规则设置')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('套餐授权')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('用户管理')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('订单')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('兑换码')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('认证安全')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('审计日志')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('订阅设置')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('销售页配置')).toBeVisible();
+  await expect(page.getByText('接入节点', { exact: true })).toBeVisible();
+  await expectAdminWorkspaces(page);
 
   const accessRoutingResponse = page.waitForResponse(
     (response) => response.url().includes('/api/admin/access-routing') && response.request().method() === 'GET',
@@ -196,7 +187,7 @@ test('管理员可以登录并查看概览、中转节点和分组', async ({ pa
   }
   await expect(page).toHaveURL(/\/admin\/transit-nodes$/);
   await expect(page.getByRole('heading', { name: '中转节点' })).toBeVisible();
-  await expect(page.getByText('部署任务')).toBeVisible();
+  await expect(page.getByText('部署任务', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'install-smoke.example.test:443' })).toBeVisible();
   await expect(page.getByText('启动运行组件')).toBeVisible();
   if (requireRealAccessEndpoint) {
@@ -212,15 +203,15 @@ test('管理员可以登录并查看概览、中转节点和分组', async ({ pa
   await expect(page.getByText('Agent Token')).toHaveCount(0);
   await expect(page.getByText('SSH 地址')).toHaveCount(0);
   await expect(page.getByText('Xray API 端口')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Agent 安装说明', exact: true }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: '一键安装 Agent', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agent 安装说明', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '一键安装 Agent', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '选择出口管理线路', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '新增中转节点', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '一键部署', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '部署/重装', exact: true })).toHaveCount(0);
   await expectDialogOpensAndCloses(page, '新增中转节点', '新增中转节点');
-  await page.getByRole('button', { name: 'Agent 安装说明', exact: true }).first().click();
-  const installDialog = page.getByRole('dialog', { name: 'Agent 安装说明' });
+  await openNodeOnboarding(page, 'manual');
+  const installDialog = page.getByRole('dialog', { name: '手动安装 Agent' });
   await expect(installDialog).toBeVisible();
   await expect(installDialog.getByText('后台不会创建节点')).toBeVisible();
   await expect(installDialog.getByText('初始入口')).toHaveCount(0);
@@ -423,7 +414,7 @@ test('管理员可以登录并查看概览、中转节点和分组', async ({ pa
 
   await page.goto('/admin/audit-logs');
   await expect(page.getByRole('heading', { name: '审计日志' })).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('审计日志')).toBeVisible();
+  await expect(page.getByRole('link', { name: '操作审计', exact: true })).toBeVisible();
   await expect(page.getByRole('main').getByText('admin')).toBeVisible();
   await expect(page.getByText('access_node.deploy')).toBeVisible();
   await expect(page.getByText('access_node:node-1')).toBeVisible();

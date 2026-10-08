@@ -93,6 +93,19 @@ impl PgStore {
         .execute(&mut *tx)
         .await?;
 
+        let pool_ids = sqlx::query_scalar::<_, Uuid>(
+            "SELECT exit_pool_id FROM exit_pool_members WHERE exit_endpoint_id = $1",
+        )
+        .bind(endpoint_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        super::line_binding::prune_unusable_exit_pool_lines_in_tx(&mut tx, &pool_ids).await?;
+        super::dirty::mark_nodes_dirty_for_endpoint_in_tx(
+            &mut tx,
+            endpoint_id,
+            "local_exit_lines_changed",
+        )
+        .await?;
         mark_access_node_dirty_in_tx(&mut tx, access_node_id, "local_exit_lines_changed").await?;
         tx.commit().await?;
         Ok(())
@@ -103,30 +116,8 @@ impl PgStore {
     pub async fn delete_local_exit_line(&self, endpoint_id: Uuid) -> Result<(), DbError> {
         let mut tx = self.pool.begin().await?;
         let access_node_id = self_hosted_exit_node_id_in_tx(&mut tx, endpoint_id).await?;
-        // 先取出 exit_resource_id,删端点后再删自建资源,保持出口列表干净。
-        let resource_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT exit_resource_id FROM exit_endpoints WHERE id = $1",
-        )
-        .bind(endpoint_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        sqlx::query("DELETE FROM exit_endpoints WHERE id = $1")
-            .bind(endpoint_id)
-            .execute(&mut *tx)
+        self.delete_exit_endpoint_in_tx(&mut tx, endpoint_id)
             .await?;
-        // 自建出口一资源对一端点:端点删光后删空资源,避免遗留孤儿。
-        let remaining = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM exit_endpoints WHERE exit_resource_id = $1",
-        )
-        .bind(resource_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if remaining == 0 {
-            sqlx::query("DELETE FROM exit_resources WHERE id = $1 AND ownership = 'self_hosted'")
-                .bind(resource_id)
-                .execute(&mut *tx)
-                .await?;
-        }
         mark_access_node_dirty_in_tx(&mut tx, access_node_id, "local_exit_lines_changed").await?;
         tx.commit().await?;
         Ok(())

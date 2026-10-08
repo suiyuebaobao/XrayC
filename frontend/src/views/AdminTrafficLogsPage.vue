@@ -10,22 +10,17 @@ import { ElMessage } from 'element-plus';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '@/components/PageHeader.vue';
-import { apiClient, type AdminUser, type AdminUserTrafficLog } from '@/services/api';
-import UserTrafficLogsTable from '@/views/users/UserTrafficLogsTable.vue';
+import { apiClient, type AdminUser } from '@/services/api';
+import UserTrafficLogsPanel from '@/views/users/UserTrafficLogsPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
 const loadingUsers = ref(true);
-const loadingLogs = ref(false);
 const users = ref<AdminUser[]>([]);
-const logs = ref<AdminUserTrafficLog[]>([]);
 const selectedUserId = ref('');
-const total = ref(0);
+const trafficPanel = ref<InstanceType<typeof UserTrafficLogsPanel>>();
 const filters = reactive({
   keyword: '',
-  page: 1,
-  pageSize: 20,
-  range: [] as string[],
 });
 
 const selectedUser = computed(() => users.value.find((user) => String(user.id) === selectedUserId.value));
@@ -49,8 +44,6 @@ watch(
     const next = typeof value === 'string' ? value : '';
     if (next && next !== selectedUserId.value) {
       selectedUserId.value = next;
-      filters.page = 1;
-      void loadLogs();
     }
   },
 );
@@ -59,12 +52,12 @@ async function loadUsers() {
   loadingUsers.value = true;
   try {
     users.value = await apiClient.getAdminUsers();
-    selectedUserId.value = initialUserId();
-    if (selectedUserId.value) {
-      await loadLogs();
-    }
+    const next = initialUserId();
+    if (next === selectedUserId.value) await trafficPanel.value?.reload();
+    else selectedUserId.value = next;
   } catch (error) {
     users.value = [];
+    selectedUserId.value = '';
     ElMessage.error(error instanceof Error ? error.message : '加载用户列表失败');
   } finally {
     loadingUsers.value = false;
@@ -76,51 +69,20 @@ function initialUserId() {
   if (routeUserId && users.value.some((user) => String(user.id) === routeUserId)) {
     return routeUserId;
   }
+  if (users.value.some((user) => String(user.id) === selectedUserId.value)) return selectedUserId.value;
   return users.value[0] ? String(users.value[0].id) : '';
 }
 
 async function selectUser(user: AdminUser) {
   selectedUserId.value = String(user.id);
-  filters.page = 1;
   await router.replace({ path: '/admin/traffic-logs', query: { user_id: selectedUserId.value } });
-  await loadLogs();
 }
 
-async function loadLogs() {
-  if (!selectedUserId.value) {
-    logs.value = [];
-    total.value = 0;
-    return;
-  }
-
-  loadingLogs.value = true;
-  try {
-    const page = await apiClient.getAdminUserTrafficLogs(selectedUserId.value, {
-      page: filters.page,
-      pageSize: filters.pageSize,
-      from: filters.range[0],
-      to: filters.range[1],
-    });
-    logs.value = page.items;
-    total.value = page.total;
-  } catch (error) {
-    logs.value = [];
-    total.value = 0;
-    ElMessage.error(error instanceof Error ? error.message : '加载用户流量日志失败');
-  } finally {
-    loadingLogs.value = false;
-  }
-}
-
-function searchLogs() {
-  filters.page = 1;
-  void loadLogs();
-}
 </script>
 
 <template>
-  <PageHeader title="用户流量日志" description="管理员后台按用户查看访问 IP、入口、出口端点、真实流量和扣费流量；超过运营设置保留期的详细日志会汇总后清理。">
-    <el-button :icon="Refresh" :loading="loadingUsers || loadingLogs" @click="loadUsers">刷新</el-button>
+  <PageHeader title="用户流量日志" description="按用户查询访问记录、线路及真实／扣费流量，与用户详情共用同一查询方式。">
+    <el-button :icon="Refresh" :loading="loadingUsers" @click="loadUsers">刷新</el-button>
   </PageHeader>
 
   <div class="traffic-layout">
@@ -156,37 +118,7 @@ function searchLogs() {
         </div>
       </template>
 
-      <div class="log-toolbar">
-        <el-date-picker
-          v-model="filters.range"
-          type="datetimerange"
-          value-format="YYYY-MM-DDTHH:mm:ss[Z]"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
-          range-separator="至"
-        />
-        <el-button :icon="Search" type="primary" plain :disabled="!selectedUserId" @click="searchLogs">
-          查询
-        </el-button>
-      </div>
-
-      <UserTrafficLogsTable
-        :logs="logs"
-        :loading="loadingLogs"
-        empty-text="请选择用户或等待该用户产生流量日志"
-      />
-
-      <el-pagination
-        class="traffic-log-pagination"
-        background
-        layout="total, sizes, prev, pager, next"
-        :total="total"
-        :page-size="filters.pageSize"
-        :current-page="filters.page"
-        :page-sizes="[20, 50, 100, 200]"
-        @update:current-page="(page: number) => { filters.page = page; void loadLogs(); }"
-        @update:page-size="(size: number) => { filters.pageSize = size; filters.page = 1; void loadLogs(); }"
-      />
+      <UserTrafficLogsPanel ref="trafficPanel" :user-id="selectedUserId" />
     </el-card>
   </div>
 </template>

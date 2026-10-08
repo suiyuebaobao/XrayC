@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
 FROM rust:1-bookworm AS builder
+ARG XRAYC_BUILD_ID=development
+ARG CARGO_BUILD_JOBS=2
+ENV XRAYC_BUILD_ID=${XRAYC_BUILD_ID}
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 WORKDIR /app
@@ -17,6 +21,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM postgres:16-bookworm AS pg-client
 
 FROM debian:bookworm-slim AS runtime
+ARG XRAYC_BUILD_ID=development
+LABEL org.opencontainers.image.version=${XRAYC_BUILD_ID}
 
 # access-agent 运行时需自签节点全部域名证书:certbot 跑 ACME 签发/续期,
 # python3-certbot-dns-cloudflare 提供 DNS-01 插件(CF token 同账号通签、免占 80 端口),

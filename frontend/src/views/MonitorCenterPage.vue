@@ -8,7 +8,7 @@
 -->
 <script setup lang="ts">
 import { Refresh } from '@element-plus/icons-vue';
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import OperationsActivitySection from '@/views/operations/OperationsActivitySection.vue';
 import OperationsHero from '@/views/operations/OperationsHero.vue';
@@ -31,25 +31,36 @@ import MonitorTrafficPanel from '@/views/monitor/MonitorTrafficPanel.vue';
 import { usePlatformMetrics } from '@/views/monitor/usePlatformMetrics';
 import { useNodeTraffic } from '@/views/monitor/useNodeTraffic';
 
-const ops = useOperationsPage();
-const health = useHealthCheck();
+const activeTab = ref('overview');
+const healthBoardTab = ref('node');
+const diagnostics = ref(false);
+let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+const ops = useOperationsPage({
+  includeDetails: () => diagnostics.value || ['node-resource', 'traffic'].includes(activeTab.value),
+  includeRanking: () => diagnostics.value,
+});
+const health = useHealthCheck({ active: () => activeTab.value === 'health' });
 const platform = usePlatformMetrics();
 const nodeTraffic = useNodeTraffic();
 
-const activeTab = ref('overview');
-const healthBoardTab = ref('node');
-
-// 平台资源与节点今日流量走手动加载（其它两个 composable 自身 onMounted 已自动加载）。
-onMounted(() => {
-  void platform.load();
-  void nodeTraffic.load();
+watch(activeTab, (tab) => {
+  if (tab === 'platform') void platform.load();
+  else if (tab === 'node-resource') { void ops.load(); void nodeTraffic.load(); }
+  else if (tab === 'traffic' || tab === 'overview') void ops.load();
 });
-
-function refreshAll() {
+watch(diagnostics, (expanded) => {
+  if (diagnosticTimer) clearTimeout(diagnosticTimer);
+  if (expanded) diagnosticTimer = setTimeout(() => { diagnostics.value = false; }, 10 * 60 * 1000);
   void ops.load();
-  void health.load();
-  void platform.load();
-  void nodeTraffic.load();
+});
+onBeforeUnmount(() => { if (diagnosticTimer) clearTimeout(diagnosticTimer); });
+function refreshAll() {
+  if (activeTab.value === 'health') void health.load();
+  else if (activeTab.value === 'platform') void platform.load();
+  else {
+    void ops.load();
+    if (activeTab.value === 'node-resource') void nodeTraffic.load();
+  }
 }
 
 function alertType(severity: string) {
@@ -126,6 +137,11 @@ function alertType(severity: string) {
           </el-table>
         </el-card>
 
+        <el-card shadow="never" class="operations-card">
+          <el-switch v-model="diagnostics" active-text="展开诊断明细（10 分钟）" aria-label="展开诊断明细" />
+          <p class="muted">日常查看汇总与告警；排障时展开线路、探测和事件明细，十分钟后自动收起。</p>
+        </el-card>
+        <div v-if="diagnostics">
         <OperationsLedgerRankingCard
           :error="ops.ledgerRankingError.value"
           :hint="ops.ledgerRankingHint.value"
@@ -150,6 +166,9 @@ function alertType(severity: string) {
           :node-detail-error="ops.nodeDetailError.value"
           :recent-events="ops.recentEvents.value"
         />
+        </div>
+        <el-collapse>
+          <el-collapse-item title="监控与保留设置" name="policies">
         <OperationsStatusSettingsSection
           :saving-settings="ops.savingSettings.value"
           :settings-error="ops.settingsError.value"
@@ -158,6 +177,8 @@ function alertType(severity: string) {
           :summary="ops.summary.value"
           @save="ops.saveSettings"
         />
+          </el-collapse-item>
+        </el-collapse>
       </template>
     </el-tab-pane>
 

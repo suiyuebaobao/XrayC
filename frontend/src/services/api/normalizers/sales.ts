@@ -18,8 +18,14 @@ export function normalizeSalesLanding(value: unknown): SalesLandingConfig {
   const data = recordValue(value);
   const hero = recordValue(data.hero);
   const cta = recordValue(data.cta);
+  const portal = recordValue(data.portalFeatures ?? data.portal_features);
 
   return {
+    portalFeatures: {
+      plans: booleanValue(portal.plans ?? true), orders: booleanValue(portal.orders ?? true),
+      redeem: booleanValue(portal.redeem ?? true), invites: booleanValue(portal.invites ?? true),
+      marketing: booleanValue(portal.marketing ?? true),
+    },
     eyebrow: stringValue(data.eyebrow ?? hero.eyebrow) || 'Global Transit Access',
     title: stringValue(data.title ?? hero.title) || '稳定高速的全球中转流量套餐',
     subtitle: stringValue(data.subtitle ?? data.description ?? hero.subtitle)
@@ -230,6 +236,7 @@ function normalizeSalesLandingFaqs(value: unknown, fallback: SalesLandingFaq[]):
 
 export function salesLandingPayload(payload: SalesLandingConfig) {
   return {
+    portal_features: payload.portalFeatures,
     eyebrow: payload.eyebrow,
     title: payload.title,
     subtitle: payload.subtitle,

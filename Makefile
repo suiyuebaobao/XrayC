@@ -147,14 +147,13 @@ check-running-current:
 
 check-release: check check-postgres-integration check-worker-smoke compose-check
 
-check-real-release: check-real-release-env package-docker-artifacts check-deploy-artifact-endpoint
-	real_env="$${XRAYC_REAL_RELEASE_ENV_FILE:-.env.real-release}"; \
-	case "$$real_env" in /*|*/*) real_env_path="$$real_env" ;; *) real_env_path="./$$real_env" ;; esac; \
-	set -a; . "$$real_env_path"; set +a; \
-	DATABASE_URL="$${XRAYC_REAL_RELEASE_COMPOSE_DATABASE_URL:-postgres://$${POSTGRES_USER:-xrayc}:$${POSTGRES_PASSWORD:-change-me}@postgres:5432/$${POSTGRES_DB:-xrayc}}" \
-	$(COMPOSE) --env-file "$$real_env_path" up -d --no-build api worker caddy --remove-orphans
+check-real-release: check-real-release-env check-deploy-artifact-endpoint
 	bash scripts/check-running-images-current.sh
 	bash scripts/check-real-release.sh
+
+# 唯读运行版本检查；完整 real-release 仍包含明确的测试资产写入，不能当作纯只读探测。
+check-release-status:
+	python3 scripts/check-release-status.py
 
 check: fmt clippy test frontend-build check-no-legacy check-source-file-length
 	for script in scripts/real-*.sh scripts/ops-mistake-recovery-uat.sh scripts/ops-mistake-recovery-large-uat.sh scripts/runtime-loadtest.sh scripts/prepare-runtime-loadtest-seed.sh scripts/runtime-http-loadtest.sh scripts/runtime-http-loadtest-compose.sh scripts/api-contract-smoke-draft.sh scripts/bootstrap-real-release-env.sh scripts/prepare-real-e2e-auth-env.sh scripts/check-real-e2e-auth-accounts.sh scripts/prepare-real-protocol-matrix-assets.sh scripts/prepare-real-protocol-matrix-endpoints.sh scripts/prepare-real-protocol-matrix-control-plane.sh scripts/check-real-protocol-matrix-env.sh scripts/observe-real-client-env.sh scripts/check-deploy-artifact-endpoint.sh scripts/check-real-release.sh scripts/check-real-release-env.sh scripts/check-real-subscription-client-compat.sh scripts/prepare-real-release-env.sh scripts/verify-no-secrets.sh scripts/check-no-legacy.sh scripts/check-source-file-length.sh scripts/validate-real-release-env.sh scripts/check-real-release-assets-docs.sh scripts/check-agent-install-cleanup.sh scripts/check-v2-deploy-contract.sh scripts/deploy-access-agent.sh scripts/test-real-v2-inventory-fallback.sh scripts/test-real-test-server-assets-static.sh scripts/test-real-remote-install-smoke-env.sh scripts/test-real-v2-plan-binding.sh scripts/test-real-multi-user-traffic-uat-static.sh scripts/test-real-subscription-client-compat-static.sh scripts/test-real-access-inbound-matrix-static.sh scripts/test-real-third-party-redaction.sh; do bash -n "$$script"; done
@@ -164,6 +163,7 @@ check: fmt clippy test frontend-build check-no-legacy check-source-file-length
 	bash scripts/check-agent-install-cleanup.sh
 	bash scripts/check-v2-deploy-contract.sh
 	bash scripts/check-agent-env-escape.sh
+	bash scripts/test-agent-preflight.sh
 	bash scripts/test-v2-mainline-coverage.sh
 	bash scripts/test-real-v2-inventory-fallback.sh
 	bash scripts/test-real-remote-install-smoke-env.sh

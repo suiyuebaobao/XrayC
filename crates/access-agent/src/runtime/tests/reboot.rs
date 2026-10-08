@@ -2,7 +2,7 @@
 //! 测试只用本地 `true`/`false`/写标记命令驱动各分支,绝不真重启宿主。
 //! 钉死口径(§7.7.1):重启只由控制面下发命令触发,执行前先安全自检——
 //! GRUB 默认引导最高内核、容器自启策略、docker 开机自启,任一不过即拒绝重启。
-//! 自检全过才下达 reboot;reboot 命令置空只回报成功不真重启(测试)。
+//! 自检全过才下达 reboot;reboot 命令置空必须回报失败，不伪装为执行成功。
 //! 自检命令置空按满足放行;自检命令退出非 0 或异常即保守拒绝重启。
 //! request_id 必须原样带回,供控制面清理待执行重启请求。
 //! 结果只回脱敏短摘要,不回宿主明文细节。
@@ -94,10 +94,10 @@ async fn test_execute_reboot_task_refuses_reboot_when_container_check_fails() {
 }
 
 #[tokio::test]
-async fn test_execute_reboot_task_success_without_real_reboot_when_command_empty() {
+async fn test_execute_reboot_task_fails_when_command_empty() {
     let dir = tempdir().expect("tempdir");
     let mut settings = test_settings("http://127.0.0.1:1".to_string(), dir.path());
-    // 自检命令全空:按满足放行;重启命令也空:回报成功但不真重启。
+    // 自检命令全空:按满足放行;重启命令也空:必须如实回报未执行。
     settings.reboot_check_grub_default_command = String::new();
     settings.reboot_check_container_restart_command = String::new();
     settings.reboot_check_docker_enabled_command = String::new();
@@ -111,6 +111,6 @@ async fn test_execute_reboot_task_success_without_real_reboot_when_command_empty
     )
     .await;
 
-    assert_eq!(result.status, "success");
+    assert_eq!(result.status, "failed");
     assert!(result.message.contains("未实际重启"));
 }

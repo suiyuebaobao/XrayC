@@ -16,6 +16,21 @@ pub(crate) async fn prune_unusable_exit_pool_lines_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     exit_pool_ids: &[Uuid],
 ) -> Result<Vec<Uuid>, DbError> {
+    reconcile_pool_lines_in_tx(tx, exit_pool_ids, true).await
+}
+
+pub(crate) async fn reconcile_binding_lines_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    exit_pool_ids: &[Uuid],
+) -> Result<Vec<Uuid>, DbError> {
+    reconcile_pool_lines_in_tx(tx, exit_pool_ids, false).await
+}
+
+async fn reconcile_pool_lines_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    exit_pool_ids: &[Uuid],
+    include_legacy: bool,
+) -> Result<Vec<Uuid>, DbError> {
     if exit_pool_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -43,31 +58,42 @@ pub(crate) async fn prune_unusable_exit_pool_lines_in_tx(
     .execute(&mut **tx)
     .await?;
 
-    let disabled_line_ids = sqlx::query_scalar::<_, Uuid>(
+    // 一次计算最终状态，避免先启用再停用造成无效写入或跨节点反复置脏。
+    let changed = sqlx::query_as::<_, (Uuid, Uuid, bool)>(
         r#"
-        UPDATE access_lines l
-        SET enabled = FALSE
-        WHERE l.exit_pool_id = ANY($1)
-          AND l.enabled = TRUE
-          AND NOT EXISTS (
-              SELECT 1
-              FROM exit_pool_members m
-              JOIN exit_pools p ON p.id = m.exit_pool_id
-              JOIN exit_endpoints e ON e.id = m.exit_endpoint_id
-              JOIN exit_resources r ON r.id = e.exit_resource_id
-              WHERE m.exit_pool_id = l.exit_pool_id
-                AND p.enabled = TRUE
-                AND m.status = 'healthy'
-                AND m.allow_new_assignments = TRUE
-                AND e.enabled = TRUE
-                AND r.enabled = TRUE
-          )
-        RETURNING l.id
+        WITH desired AS (
+            SELECT l.id, (CASE WHEN b.id IS NOT NULL THEN e.enabled AND b.enabled ELSE l.enabled END)
+                AND EXISTS (
+                    SELECT 1 FROM exit_pool_members m
+                    JOIN exit_pools p ON p.id=m.exit_pool_id
+                    JOIN exit_endpoints ee ON ee.id=m.exit_endpoint_id
+                    JOIN exit_resources r ON r.id=ee.exit_resource_id
+                    WHERE m.exit_pool_id=l.exit_pool_id AND p.enabled
+                      AND m.status='healthy' AND m.allow_new_assignments AND ee.enabled AND r.enabled
+                ) AS enabled
+            FROM access_lines l
+            LEFT JOIN access_entry_exit_bindings b ON b.id=l.id
+            LEFT JOIN access_entries e ON e.id=b.access_entry_id
+            WHERE l.exit_pool_id=ANY($1) AND ($2::boolean OR b.id IS NOT NULL)
+        )
+        UPDATE access_lines l SET enabled=d.enabled FROM desired d
+        WHERE l.id=d.id AND l.enabled IS DISTINCT FROM d.enabled
+        RETURNING l.id,l.access_node_id,l.enabled
         "#,
-    )
-    .bind(exit_pool_ids)
-    .fetch_all(&mut **tx)
-    .await?;
+    ).bind(exit_pool_ids).bind(include_legacy).fetch_all(&mut **tx).await?;
+    let disabled_line_ids: Vec<Uuid> = changed
+        .iter()
+        .filter(|(_, _, enabled)| !enabled)
+        .map(|(id, _, _)| *id)
+        .collect();
+    for node in changed
+        .iter()
+        .map(|(_, node, _)| *node)
+        .collect::<std::collections::HashSet<_>>()
+    {
+        super::dirty::mark_access_node_dirty_in_tx(tx, node, "runtime_binding_state_reconciled")
+            .await?;
+    }
 
     if !disabled_line_ids.is_empty() {
         sqlx::query("DELETE FROM user_access_line_assignments WHERE access_line_id = ANY($1)")

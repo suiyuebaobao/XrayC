@@ -66,6 +66,14 @@ pub(crate) fn validate_positive_i32(value: i32, field: &str) -> Result<i32, DbEr
     Ok(value)
 }
 
+// 数据库用 -1 表示不限流量，保留 0 的零额度含义。
+pub(crate) fn validate_traffic_limit(value: i64) -> Result<i64, DbError> {
+    if value < -1 {
+        return Err(invalid_payload("流量额度必须为 -1（不限流量）或非负数"));
+    }
+    Ok(value)
+}
+
 pub(crate) fn validate_plan_multiplier(value: f64, field: &str) -> Result<f64, DbError> {
     if !value.is_finite() || value <= 0.0 || value > 100.0 {
         return Err(DbError::InvalidAgentPayload(format!(

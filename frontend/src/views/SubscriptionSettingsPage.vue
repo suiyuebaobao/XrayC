@@ -44,7 +44,9 @@ async function load() {
 async function save() {
   saving.value = true;
   try {
-    applySettings(await apiClient.updateSubscriptionSettings({ ...settings }));
+    const payload: Partial<SubscriptionSettings> = { ...settings };
+    delete payload.defaultRules;
+    applySettings(await apiClient.updateSubscriptionSettings(payload));
     ElMessage.success('订阅设置已保存');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存订阅设置失败');
@@ -86,19 +88,19 @@ function applySettings(next: SubscriptionSettings) {
             <el-input v-model="settings.profileName" placeholder="例如：XrayC" />
           </el-form-item>
           <div class="basic-grid">
-            <el-form-item label="mixed-port">
+            <el-form-item label="客户端代理端口">
               <el-input-number v-model="settings.mixedPort" :min="0" :max="65535" controls-position="right" />
             </el-form-item>
-            <el-form-item label="allow-lan">
+            <el-form-item label="允许局域网访问">
               <el-switch v-model="settings.allowLan" active-text="允许" inactive-text="关闭" />
             </el-form-item>
-            <el-form-item label="mode">
+            <el-form-item label="运行模式">
               <el-select v-model="settings.mode" class="form-field">
-                <el-option label="rule" value="rule" />
-                <el-option label="global" value="global" />
+                <el-option label="按规则分流" value="rule" />
+                <el-option label="全局代理" value="global" />
               </el-select>
             </el-form-item>
-            <el-form-item label="log-level">
+            <el-form-item label="客户端日志">
               <el-select v-model="settings.logLevel" class="form-field">
                 <el-option label="info" value="info" />
                 <el-option label="warning" value="warning" />

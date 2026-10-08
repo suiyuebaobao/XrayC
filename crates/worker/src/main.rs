@@ -8,7 +8,8 @@ mod backups;
 use std::time::Duration;
 
 use backups::DatabaseBackupRunner;
-use xrayc_db::PgStore;
+use tokio::task::JoinSet;
+use xrayc_db::{PgStore, WorkerMaintenanceJob};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,7 +25,8 @@ async fn main() -> anyhow::Result<()> {
     let interval = std::env::var("WORKER_TICK_SECONDS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(60);
+        .unwrap_or(60)
+        .max(1);
     let runtime_retention_days = std::env::var("WORKER_RUNTIME_RETENTION_DAYS")
         .ok()
         .and_then(|value| value.parse::<i64>().ok())
@@ -33,6 +35,13 @@ async fn main() -> anyhow::Result<()> {
     let store = PgStore::connect(&database_url).await?;
     store.migrate(&migrations_path).await?;
 
+    let instance_id = store
+        .register_worker_version(
+            env!("CARGO_PKG_VERSION"),
+            option_env!("XRAYC_BUILD_ID").unwrap_or("development"),
+            interval,
+        )
+        .await?;
     let stale_deploy_threshold = stale_deployment_threshold_seconds();
     tracing::info!(
         interval,
@@ -40,32 +49,61 @@ async fn main() -> anyhow::Result<()> {
         stale_deploy_threshold,
         "starting xrayc worker"
     );
-    loop {
-        match store.run_worker_maintenance(runtime_retention_days).await {
-            Ok(result) => tracing::info!(?result, "worker maintenance finished"),
-            Err(error) => tracing::error!(?error, "worker maintenance failed"),
-        }
-        // 卡死自愈:把超过阈值未推进的非终态部署任务标记为 failed,
-        // 避免失败/回滚的一键安装永远停在 waiting_for_server。
-        match store
-            .mark_stale_deployment_tasks_failed(stale_deploy_threshold)
-            .await
-        {
-            Ok(failed) => {
-                if failed > 0 {
-                    tracing::info!(failed, "stale deployment tasks marked failed");
+    let mut tasks = JoinSet::<()>::new();
+    for job in WorkerMaintenanceJob::ALL {
+        let store = store.clone();
+        tasks.spawn(async move {
+            loop {
+                match store.run_worker_job(job, runtime_retention_days).await {
+                    Ok(result) if result.has_changes() => {
+                        tracing::info!(?job, ?result, "worker job finished")
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::error!(?job, ?error, "worker job failed; retry next interval")
+                    }
                 }
+                tokio::time::sleep(Duration::from_secs(interval)).await;
             }
-            Err(error) => tracing::error!(?error, "stale deployment task scan failed"),
-        }
-        // 一轮编排四模式(全量/异地/WAL/邮件),各模式错误已在内部脱敏隔离,
-        // 只有底层 DB/锁故障才上抛到这里记 error。
-        match backup_runner.run_all_if_due(&store).await {
-            Ok(report) => tracing::info!(?report, "database backup round finished"),
-            Err(error) => tracing::error!(?error, "database backup round failed"),
-        }
-        tokio::time::sleep(Duration::from_secs(interval)).await;
+        });
     }
+    let version_store = store.clone();
+    tasks.spawn(async move {
+        loop {
+            if let Err(error) = version_store.touch_worker_version(instance_id).await {
+                tracing::warn!(?error, "worker version heartbeat failed");
+            }
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+        }
+    });
+    let deployment_store = store.clone();
+    tasks.spawn(async move {
+        loop {
+            match deployment_store
+                .mark_stale_deployment_tasks_failed(stale_deploy_threshold)
+                .await
+            {
+                Ok(failed) if failed > 0 => {
+                    tracing::info!(failed, "stale deployment tasks marked failed")
+                }
+                Ok(_) => {}
+                Err(error) => tracing::error!(?error, "stale deployment task scan failed"),
+            }
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+        }
+    });
+    tasks.spawn(async move {
+        loop {
+            match backup_runner.run_all_if_due(&store).await {
+                Ok(report) => tracing::debug!(?report, "database backup round finished"),
+                Err(error) => tracing::error!(?error, "database backup round failed"),
+            }
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+        }
+    });
+    // 子任务意外退出必须让进程管理器恢复，不能静默丢失某类维护工作。
+    let stopped = tasks.join_next().await;
+    anyhow::bail!("worker task unexpectedly stopped: {stopped:?}")
 }
 
 /// 部署任务卡死阈值(秒):非终态任务超过此时长未推进会被标记 failed。

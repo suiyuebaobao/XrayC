@@ -48,14 +48,14 @@ impl PgStore {
         }
 
         if let Some((request_id, status, message)) = reboot_result {
-            let status = sanitize_reboot_status(&status)?;
+            let status = normalized_reboot_result(&status, &message)?;
             let message = truncate_tls_text(&message, 512);
             sqlx::query(
                 r#"
                 UPDATE access_nodes
                 SET reboot_status = $3,
                     reboot_message = $4,
-                    reboot_completed_at = now()
+                    reboot_completed_at = CASE WHEN $3 IN ('success', 'failed') THEN now() ELSE NULL END
                 WHERE id = $1
                   AND reboot_request_id = $2
                   AND reboot_completed_at IS NULL
@@ -160,5 +160,32 @@ fn sanitize_reboot_status(status: &str) -> Result<&'static str, DbError> {
         "failed" => Ok("failed"),
         "running" => Ok("running"),
         _ => Err(DbError::InvalidAgentPayload("整机重启状态无效".to_string())),
+    }
+}
+
+/// 兼容旧 Agent 的空命令误报，控制台不把明确未执行的重启显示为成功。
+fn normalized_reboot_result(status: &str, message: &str) -> Result<&'static str, DbError> {
+    let status = sanitize_reboot_status(status)?;
+    Ok(if status == "success" && message.contains("未实际重启") {
+        "failed"
+    } else {
+        status
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_empty_reboot_command_cannot_be_successful() {
+        assert_eq!(
+            normalized_reboot_result("success", "重启自检通过;重启命令未配置,未实际重启").unwrap(),
+            "failed"
+        );
+        assert_eq!(
+            normalized_reboot_result("success", "安全自检通过,已下达整机重启").unwrap(),
+            "success"
+        );
     }
 }

@@ -23,6 +23,8 @@ real-e2e-inventory.*
 *.private.md
 *.secrets.md
 *账号密码*.txt
+*帳號密碼*.txt
+*帳號密碼*.rtf
 服务器账号密码.txt
 secrets/
 # 只忽略仓库根的数据库备份输出目录(compose 卷 ./backups:/backups),
@@ -57,19 +59,3 @@ CLAUDE.md
 
 # 仓库内临时草稿/诊断转储(子 agent 产物,绝不提交)
 /scratchpad/
-
-# Private project documentation (never publish)
-/docs/
-/文档/
-*.[mM][dD]
-*.mdx
-*.rst
-*.adoc
-*.txt
-*.pdf
-*.doc
-*.docx
-*.xls
-*.xlsx
-*.ppt
-*.pptx

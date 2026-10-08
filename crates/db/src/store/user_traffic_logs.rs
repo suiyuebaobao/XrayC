@@ -80,13 +80,14 @@ impl PgStore {
             r#"
             SELECT COUNT(*)::bigint
             FROM usage_ledgers ul
+            LEFT JOIN usage_routing_snapshots hs ON hs.id = ul.routing_snapshot_id
             WHERE ul.user_id = $1
               AND ul.traffic_source = 'access_line'
-              AND COALESCE(ul.recorded_at, ul.collected_at) >= $2
+              AND (ul.preserve_on_cleanup OR COALESCE(ul.recorded_at, ul.collected_at) >= $2)
               AND ($3::timestamptz IS NULL OR COALESCE(ul.recorded_at, ul.collected_at) >= $3)
               AND ($4::timestamptz IS NULL OR COALESCE(ul.recorded_at, ul.collected_at) <= $4)
-              AND ($5::uuid IS NULL OR ul.access_line_id = $5)
-              AND ($6::uuid IS NULL OR ul.exit_endpoint_id = $6)
+              AND ($5::uuid IS NULL OR hs.access_line_id = $5)
+              AND ($6::uuid IS NULL OR hs.exit_endpoint_id = $6)
             "#,
         )
         .bind(user_id)
@@ -102,7 +103,7 @@ impl PgStore {
             r#"
             SELECT ul.id,
                    ul.user_id,
-                   ul.access_line_id,
+                   hs.access_line_id,
                    ul.xray_user_key,
                    ul.traffic_source,
                    ul.delta_uplink,
@@ -119,21 +120,22 @@ impl PgStore {
                    se.observed_at AS ip_observed_at,
                    se.active_connection_count,
                    se.status AS session_status,
-                   al.name AS access_line_name,
+                   NULLIF(hs.access_line_name, '') AS access_line_name,
                    al.protocol,
                    al.transport,
                    al.listen_host,
                    al.listen_port,
-                   an.id AS access_node_id,
-                   an.name AS access_node_name,
+                   hs.access_node_id,
+                   NULLIF(hs.access_node_name, '') AS access_node_name,
                    an.public_host AS access_node_host,
-                   ee.id AS exit_endpoint_id,
-                   ee.name AS exit_endpoint_name,
+                   hs.exit_endpoint_id,
+                   NULLIF(hs.exit_endpoint_name, '') AS exit_endpoint_name,
                    ee.outbound_type::text AS outbound_type,
                    ee.host AS exit_host,
                    ee.port AS exit_port,
                    er.name AS exit_resource_name
             FROM usage_ledgers ul
+            LEFT JOIN usage_routing_snapshots hs ON hs.id = ul.routing_snapshot_id
             LEFT JOIN access_lines al ON al.id = ul.access_line_id
             LEFT JOIN access_nodes an ON an.id = al.access_node_id
             LEFT JOIN exit_endpoints ee ON ee.id = ul.exit_endpoint_id
@@ -154,11 +156,11 @@ impl PgStore {
             ) se ON TRUE
             WHERE ul.user_id = $1
               AND ul.traffic_source = 'access_line'
-              AND COALESCE(ul.recorded_at, ul.collected_at) >= $2
+              AND (ul.preserve_on_cleanup OR COALESCE(ul.recorded_at, ul.collected_at) >= $2)
               AND ($3::timestamptz IS NULL OR COALESCE(ul.recorded_at, ul.collected_at) >= $3)
               AND ($4::timestamptz IS NULL OR COALESCE(ul.recorded_at, ul.collected_at) <= $4)
-              AND ($5::uuid IS NULL OR ul.access_line_id = $5)
-              AND ($6::uuid IS NULL OR ul.exit_endpoint_id = $6)
+              AND ($5::uuid IS NULL OR hs.access_line_id = $5)
+              AND ($6::uuid IS NULL OR hs.exit_endpoint_id = $6)
             ORDER BY COALESCE(ul.recorded_at, ul.collected_at) DESC, ul.id DESC
             LIMIT $7 OFFSET $8
             "#,

@@ -22,8 +22,23 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 impl PgStore {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) async fn reset_demo_data_for_tests(&self) -> Result<(), DbError> {
+        let name = sqlx::query_scalar::<_, String>("SELECT current_database()")
+            .fetch_one(&self.pool)
+            .await?;
+        if !(name == "test"
+            || name == "ci"
+            || name.starts_with("test_")
+            || name.ends_with("_test")
+            || name.starts_with("xrayc_test_")
+            || name.starts_with("ci_")
+            || name.ends_with("_ci"))
+        {
+            return Err(DbError::InvalidInput(
+                "拒绝在非隔离测试数据库重置演示数据".to_string(),
+            ));
+        }
         let table_list = sqlx::query_scalar::<_, Option<String>>(
             r#"
             SELECT string_agg(format('%I.%I', schemaname, tablename), ', ')
@@ -42,7 +57,7 @@ impl PgStore {
     }
 
     pub async fn seed_demo_data(&self) -> Result<(), DbError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         self.reset_demo_data_for_tests().await?;
 
         let user_id = uuid("00000000-0000-0000-0000-000000000001");

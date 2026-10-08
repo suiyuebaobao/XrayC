@@ -9,7 +9,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "preview:ui": "node preview/start.cjs"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^5.2.4",

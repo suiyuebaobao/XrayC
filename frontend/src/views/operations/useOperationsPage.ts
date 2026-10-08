@@ -57,7 +57,8 @@ const defaultSettings: AccessOperationsSettings = {
   },
 };
 
-export function useOperationsPage() {
+export function useOperationsPage(options: { includeDetails?: () => boolean; includeRanking?: () => boolean } = {}) {
+  let loadGeneration = 0;
   const loading = ref(true);
   const summary = ref<OperationsSummary>();
   const ledgerRanking = ref<OperationsLedgerRanking | null>(null);
@@ -183,6 +184,7 @@ export function useOperationsPage() {
   onMounted(load);
 
   async function load() {
+    const generation = ++loadGeneration;
     loading.value = true;
     summaryError.value = '';
     ledgerRankingError.value = '';
@@ -190,10 +192,11 @@ export function useOperationsPage() {
 
     const [summaryResult, controlPlaneResult, ledgerRankingResult] = await Promise.allSettled([
       apiClient.getOperationsSummary(),
-      apiClient.getControlPlane(),
-      apiClient.getOperationsLedgerRanking(10),
+      options.includeDetails?.() === false ? Promise.resolve(null) : apiClient.getControlPlane(),
+      options.includeRanking?.() === false ? Promise.resolve(null) : apiClient.getOperationsLedgerRanking(10),
     ]);
 
+    if (generation !== loadGeneration) return;
     if (summaryResult.status === 'fulfilled') {
       summary.value = summaryResult.value;
       settingsForm.value = cloneSettings(summaryResult.value.settings);
@@ -202,7 +205,7 @@ export function useOperationsPage() {
       summaryError.value = errorText(summaryResult.reason, '运营 summary 加载失败');
     }
 
-    if (controlPlaneResult.status === 'fulfilled') {
+    if (controlPlaneResult.status === 'fulfilled' && controlPlaneResult.value) {
       accessNodes.value = controlPlaneResult.value.accessNodes;
       accessLines.value = controlPlaneResult.value.accessLines;
       exitPools.value = controlPlaneResult.value.exitPools;
@@ -210,7 +213,7 @@ export function useOperationsPage() {
       accessNodes.value = null;
       accessLines.value = null;
       exitPools.value = null;
-      nodeDetailError.value = errorText(controlPlaneResult.reason, '中转节点明细未上报');
+      nodeDetailError.value = controlPlaneResult.status === 'rejected' ? errorText(controlPlaneResult.reason, '中转节点明细未上报') : '';
     }
 
     if (ledgerRankingResult.status === 'fulfilled') {

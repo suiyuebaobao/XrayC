@@ -16,6 +16,8 @@ use serde::Deserialize;
 pub(crate) struct HeartbeatRequest {
     pub(crate) access_node_id: Option<Uuid>,
     pub(crate) node_id: Option<String>,
+    pub(crate) agent_version: Option<String>,
+    pub(crate) xray_version: Option<String>,
     pub(crate) applied_config_hash: Option<String>,
     pub(crate) applied_config_version: Option<String>,
     #[serde(default)]
@@ -60,6 +62,16 @@ pub(crate) async fn agent_heartbeat(
             Ok(true) => {}
             Ok(false) => return unauthorized().into_response(),
             Err(err) => return internal_error(err).into_response(),
+        }
+        if let Err(err) = pg
+            .record_agent_versions(
+                reported_node_id,
+                body.agent_version.as_deref(),
+                body.xray_version.as_deref(),
+            )
+            .await
+        {
+            return unprocessable(err).into_response();
         }
         if let Err(err) = pg
             .record_agent_tls_status(

@@ -5,10 +5,11 @@
 //! 本模块不保存服务器密码、代理凭据、完整命令或安装日志。
 //! 管理端读取任务列表用于部署进度 UI。
 //! 状态机保持简单，避免引入复杂工作流引擎。
-//! 失败信息会截断，防止日志或系统路径泄露过多。
+//! 错误摘要保留开头和末尾；完整脱敏错误使用有界结果字段。
 //! SQL 均通过 PgStore 连接池执行。
 //! 文件头部中文注释满足仓库规则。
 
+use super::deployment_task_progress::{deployment_error_summary, update_deployment_steps_statuses};
 use super::dirty::*;
 use super::existence::*;
 use super::line_binding::*;
@@ -90,89 +91,6 @@ impl PgStore {
         Ok(json!({
             "items": rows.into_iter().map(deployment_task_json).collect::<Vec<_>>()
         }))
-    }
-
-    pub async fn record_deployment_task_report(
-        &self,
-        input: DeploymentTaskReportInput,
-    ) -> Result<Value, DbError> {
-        let Some((token_hash, current_steps)) = sqlx::query_as::<_, (String, Value)>(
-            "SELECT report_token_hash, steps FROM deployment_tasks WHERE id = $1",
-        )
-        .bind(input.task_id)
-        .fetch_optional(&self.pool)
-        .await?
-        else {
-            return Err(DbError::InvalidInput("部署任务不存在".to_string()));
-        };
-        if token_hash != agent_token_hash(input.report_token.trim()) {
-            return Err(DbError::InvalidInput("部署任务上报鉴权失败".to_string()));
-        }
-
-        let normalized_status = input
-            .status
-            .as_deref()
-            .map(normalize_deployment_task_status)
-            .transpose()?
-            .unwrap_or_else(|| "running".to_string());
-        let current_step = input
-            .step
-            .as_deref()
-            .map(|value| truncate_deployment_text(value, 128))
-            .unwrap_or_else(|| normalized_status.clone());
-        let progress = input
-            .progress_percent
-            .unwrap_or_else(|| default_deployment_progress(&normalized_status))
-            .clamp(0, 100);
-        let error_summary = if normalized_status == "failed" {
-            truncate_deployment_text(input.message.as_deref().unwrap_or("部署任务失败"), 512)
-        } else {
-            String::new()
-        };
-        let safe_result = sanitize_deployment_json(input.result.unwrap_or_else(|| {
-            json!({
-                "message": input.message.as_deref().unwrap_or("")
-            })
-        }));
-        let updated_steps = update_deployment_steps_statuses(
-            current_steps,
-            &current_step,
-            &normalized_status,
-            input.message.as_deref().unwrap_or(""),
-        );
-        let row = sqlx::query_as::<_, DeploymentTaskRow>(
-            r#"
-            UPDATE deployment_tasks
-            SET status = $2,
-                current_step = $3,
-                progress_percent = $4,
-                result = $5,
-                error_summary = $6,
-                steps = $7,
-                started_at = COALESCE(started_at, now()),
-                completed_at = CASE
-                    WHEN $2 IN ('succeeded', 'failed', 'canceled') THEN COALESCE(completed_at, now())
-                    ELSE NULL
-                END,
-                updated_at = now()
-            WHERE id = $1
-            RETURNING
-                id, kind, status, target_type, target_id, title, summary,
-                current_step, progress_percent, safe_metadata, steps, result,
-                error_summary, created_by_user_id, NULL::text AS created_by_email,
-                created_at, updated_at, started_at, completed_at
-        "#,
-        )
-        .bind(input.task_id)
-        .bind(normalized_status)
-        .bind(current_step)
-        .bind(progress)
-        .bind(safe_result)
-        .bind(error_summary)
-        .bind(updated_steps)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(deployment_task_json(row))
     }
 
     /// 删除任意一条部署任务记录,供管理员清理失败/卡死残留。
@@ -263,7 +181,7 @@ impl PgStore {
     }
 }
 
-fn deployment_task_json(row: DeploymentTaskRow) -> Value {
+pub(super) fn deployment_task_json(row: DeploymentTaskRow) -> Value {
     let steps = deployment_steps_for_read(
         row.steps,
         &row.current_step,
@@ -326,7 +244,7 @@ fn normalize_deployment_target_type(value: &str) -> Result<String, DbError> {
     }
 }
 
-fn normalize_deployment_task_status(value: &str) -> Result<String, DbError> {
+pub(super) fn normalize_deployment_task_status(value: &str) -> Result<String, DbError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "waiting_for_server" | "running" | "succeeded" | "failed" | "canceled" => {
             Ok(value.trim().to_ascii_lowercase())
@@ -335,7 +253,7 @@ fn normalize_deployment_task_status(value: &str) -> Result<String, DbError> {
     }
 }
 
-fn default_deployment_progress(status: &str) -> i32 {
+pub(super) fn default_deployment_progress(status: &str) -> i32 {
     match status {
         "waiting_for_server" => 5,
         "running" => 50,
@@ -375,136 +293,65 @@ fn sanitize_deployment_steps(value: Value) -> Value {
         .collect::<Vec<_>>())
 }
 
-fn update_deployment_steps_statuses(
-    steps: Value,
-    current_key: &str,
-    task_status: &str,
-    message: &str,
-) -> Value {
-    let mut items = steps.as_array().cloned().unwrap_or_default();
-    let current_index = items
-        .iter()
-        .position(|item| item.get("key").and_then(Value::as_str) == Some(current_key));
-    if current_index.is_none() && !current_key.trim().is_empty() {
-        items.push(json!({
-            "key": truncate_deployment_text(current_key, 80),
-            "title": readable_deployment_step_title(current_key),
-            "detail": truncate_deployment_text(message, 512),
-            "status": if task_status == "failed" { "failed" } else { "current" }
-        }));
-    }
-    let current_index = current_index.unwrap_or_else(|| items.len().saturating_sub(1));
-
-    for (index, item) in items.iter_mut().enumerate() {
-        let Some(object) = item.as_object_mut() else {
-            continue;
-        };
-        object.insert(
-            "status".to_string(),
-            Value::String(step_status_for_position(index, current_index, task_status).to_string()),
-        );
-        object
-            .entry("key".to_string())
-            .or_insert_with(|| Value::String(format!("step_{index}")));
-        object
-            .entry("title".to_string())
-            .or_insert_with(|| Value::String("安装步骤".to_string()));
-        object
-            .entry("detail".to_string())
-            .or_insert_with(|| Value::String(String::new()));
-    }
-
-    Value::Array(items)
-}
-
-fn step_status_for_position(index: usize, current_index: usize, task_status: &str) -> &'static str {
-    match task_status {
-        "succeeded" => {
-            if index <= current_index {
-                "done"
-            } else {
-                "pending"
-            }
-        }
-        "failed" => {
-            if index < current_index {
-                "done"
-            } else if index == current_index {
-                "failed"
-            } else {
-                "pending"
-            }
-        }
-        "canceled" => {
-            if index < current_index {
-                "done"
-            } else if index == current_index {
-                "canceled"
-            } else {
-                "pending"
-            }
-        }
-        "running" => {
-            if index < current_index {
-                "done"
-            } else if index == current_index {
-                "current"
-            } else {
-                "pending"
-            }
-        }
-        _ => {
-            if index < current_index {
-                "done"
-            } else {
-                "pending"
-            }
-        }
-    }
-}
-
-fn readable_deployment_step_title(key: &str) -> String {
-    match key {
-        "ssh_install_failed" => "SSH 安装失败",
-        "auth_code_missing" => "缺少节点鉴权码",
-        "auth_code_invalid" => "节点鉴权码无效",
-        "node_register_failed" => "登记中转节点失败",
-        _ => "安装步骤",
-    }
-    .to_string()
-}
-
-fn sanitize_deployment_json(value: Value) -> Value {
+pub(super) fn sanitize_deployment_json(value: Value) -> Value {
     match value {
-        Value::Object(mut object) => {
-            for secret_key in [
-                "token",
-                "password",
-                "secret",
-                "authorization",
-                "agent_token",
-                "report_token",
-                "deploy_artifact_token",
-                "command",
-                "install_command",
-            ] {
-                object.remove(secret_key);
-            }
-            Value::Object(object)
-        }
-        Value::Array(items) => Value::Array(items.into_iter().take(50).collect()),
-        Value::String(value) => Value::String(truncate_deployment_text(&value, 512)),
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.to_ascii_lowercase().as_str(),
+                        "token"
+                            | "password"
+                            | "secret"
+                            | "authorization"
+                            | "agent_token"
+                            | "report_token"
+                            | "deploy_artifact_token"
+                            | "command"
+                            | "install_command"
+                            | "ssh_password"
+                            | "ssh_private_key"
+                            | "cf_api_token"
+                            | "auth_code"
+                    )
+                })
+                .map(|(key, value)| (key, sanitize_deployment_json(value)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .take(50)
+                .map(sanitize_deployment_json)
+                .collect(),
+        ),
+        Value::String(value) => Value::String(deployment_error_summary(&value, 16_384)),
         other => other,
     }
 }
 
-fn truncate_deployment_text(value: &str, max_chars: usize) -> String {
+pub(super) fn truncate_deployment_text(value: &str, max_chars: usize) -> String {
     value.trim().chars().take(max_chars).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deployment_result_redacts_nested_secrets_and_keeps_failure_tail() {
+        let result = sanitize_deployment_json(json!({
+            "nested": [{"PASSWORD": "hidden-password", "status": "failed"}],
+            "error": format!("{}final-download-failure", "dependency output\n".repeat(1500))
+        }));
+        assert!(!result.to_string().contains("hidden-password"));
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .ends_with("final-download-failure"));
+        assert_eq!(result["nested"][0]["status"], "failed");
+    }
 
     #[test]
     fn deployment_task_json_reconciles_stale_steps_with_terminal_status() {

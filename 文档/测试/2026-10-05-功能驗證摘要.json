@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-05",
+  "automated": {
+    "rust_passed": 710,
+    "frontend_unit_passed": 75,
+    "browser_cases_passed_cumulative": 24,
+    "browser_final_full_rerun": false
+  },
+  "final_health": {
+    "health_http": 200,
+    "node_count": 4,
+    "nodes": [
+      {
+        "name": "實測節點 node-2",
+        "status": "healthy",
+        "config_dirty": false,
+        "kernel_connmark_available": false,
+        "kernel_upgrade_pending": false,
+        "last_seen_at": null
+      },
+      {
+        "name": "開發驗證節點（同機）",
+        "status": "healthy",
+        "config_dirty": false,
+        "kernel_connmark_available": true,
+        "kernel_upgrade_pending": false,
+        "last_seen_at": null
+      },
+      {
+        "name": "實測節點 node-1",
+        "status": "healthy",
+        "config_dirty": false,
+        "kernel_connmark_available": false,
+        "kernel_upgrade_pending": false,
+        "last_seen_at": null
+      },
+      {
+        "name": "實測節點 node-3",
+        "status": "healthy",
+        "config_dirty": false,
+        "kernel_connmark_available": false,
+        "kernel_upgrade_pending": false,
+        "last_seen_at": null
+      }
+    ],
+    "user": {
+      "disabled": false,
+      "remaining_bytes": 2137807926,
+      "rate_limit_up_bps": null,
+      "rate_limit_down_bps": null
+    },
+    "backup_config": {
+      "full_destination": "local",
+      "wal_enabled": true,
+      "wal_configured": true
+    },
+    "current_subscription_http": 200,
+    "backup_state": {
+      "full": {
+        "status": "success",
+        "last_success_at": "2026-10-05T05:21:25.679996912+00:00",
+        "offsite_synced": true,
+        "error_summary": null
+      },
+      "wal": {
+        "status": "success",
+        "last_success_at": "2026-10-05T05:26:08.813131862+00:00",
+        "offsite_synced": null,
+        "error_summary": null
+      }
+    }
+  },
+  "known_issues": [
+    "exit re-enable leaves runtime lines disabled",
+    "reboot reports success without configured command",
+    "AlmaLinux nodes lack connmark support",
+    "WAL fresh-install configuration required manual correction",
+    "control-origin direct UDP path failure unresolved"
+  ],
+  "report": "2026-10-05-功能驗證報告.txt"
+}

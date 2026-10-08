@@ -79,7 +79,7 @@ test('管理员在规则设置页维护通用规则和规则库', async ({ page 
 
   await page.goto('/admin/rule-settings');
   await expect(page.getByRole('heading', { name: '规则设置' })).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('规则设置')).toBeVisible();
+  await expect(page.getByRole('link', { name: '分流规则', exact: true })).toBeVisible();
 
   const commonCard = page.locator('[data-testid="common-rules-section"]');
   await expect(commonCard.getByText('通用规则', { exact: true })).toBeVisible();

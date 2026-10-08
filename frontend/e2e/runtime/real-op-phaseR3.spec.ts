@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途：并行流3·R3 控制面全流程真实操作 E2E（真实 UI 点击 + 真实后端 no-mock + 真实 SSH 部署 agent）。
  * 覆盖域名直连(灰云,sslip.io)下 ① Trojan ② HY2(hysteria/udp) ③ Shadowsocks(2022)；严禁 mock/SQL 直插。
@@ -224,8 +225,8 @@ test.describe('并行流3·R3 控制面全流程真实操作（server_2 域名�
       expect(r.online, '已存在节点应健康').toBe(true);
       return;
     }
-    await page.getByRole('button', { name: '新增中转节点' }).click();
-    const dialog = page.getByRole('dialog', { name: '新增中转节点' });
+    await openNodeOnboarding(page, 'existing');
+    const dialog = page.getByRole('dialog', { name: '接入已有 Agent' });
     await expect(dialog).toBeVisible();
     await formItemByLabel(page, '节点名称').locator('input').fill(NODE_NAME);
     // 「客户连接地址」输入框已移除：public_host 由 IP直连>域名直连>CF域名 自动推导。

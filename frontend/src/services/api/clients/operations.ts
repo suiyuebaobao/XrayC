@@ -10,6 +10,7 @@ import type {
   OperationsSummary,
   PlatformMetrics,
 } from '../types';
+import { normalizeSystemInfo } from '../systemInfo';
 import { request } from '../http';
 import { appendQueryParam, collectionValue } from '../primitives';
 import { normalizeAdminAuditLog } from '../normalizers/audit';
@@ -23,6 +24,7 @@ import {
 import { plannedApiPaths, rustApiPaths } from '../paths';
 
 export const operationsApi = {
+  async getSystemInfo() { return normalizeSystemInfo(await request<unknown>('/api/admin/system-info')); },
   async getOverview() {
     const data = await request<Record<string, unknown>>(rustApiPaths.overview);
     return normalizeOverview(data);

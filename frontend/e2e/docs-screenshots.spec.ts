@@ -8,6 +8,11 @@ const outputDir = path.resolve(process.cwd(), '..', 'screenshots');
 
 test.use({ viewport: { width: 1440, height: 960 }, colorScheme: 'light' });
 
+test.beforeEach(async ({ page }) => {
+  // 所有未显式设置的 API 也使用示例响应，截图不能读取真实业务资料。
+  await page.route('**/api/**', (route) => route.fulfill({ json: { success: true, data: {} } }));
+});
+
 async function save(page: Page, name: string) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.evaluate(() => document.fonts.ready);
@@ -20,7 +25,7 @@ async function save(page: Page, name: string) {
 
 test('生成销售首页和平台能力截图', async ({ page }) => {
   await page.route('**/api/sales-landing', async (route) => {
-    await route.fulfill({ status: 503, contentType: 'application/json', body: '{"message":"demo fallback"}' });
+    await route.fulfill({ json: { success: true, data: {} } });
   });
 
   await page.goto('/');
@@ -57,7 +62,7 @@ test('生成管理员概览截图', async ({ page }) => {
   });
 
   await page.goto('/overview');
-  await expect(page.getByRole('heading', { name: '概览' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '总览', exact: true })).toBeVisible();
   await expect(page.getByText('128')).toBeVisible();
   await save(page, '03-admin-overview.png');
 });
@@ -129,18 +134,12 @@ test('生成用户订阅截图', async ({ page }) => {
     });
   });
 
-  // Vite 会把直接请求 /subscription 误命中 /sub 代理；先等静态页挂载，再由 history 路由切换。
-  await page.goto('/platform');
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('出口管理');
   const subscriptionResponse = page.waitForResponse((response) => (
     new URL(response.url()).pathname === '/api/user/subscription'
   ));
-  await page.evaluate(() => {
-    window.history.pushState({}, '', '/subscription');
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  });
+  await page.goto('/subscription');
   await subscriptionResponse;
-  await expect(page.getByRole('heading', { name: '订阅' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '我的服务', exact: true })).toBeVisible();
   await expect(page.getByText('标准演示套餐')).toBeVisible();
   await expect(page.getByText('香港高速')).toBeVisible();
   await save(page, '04-user-subscription.png');

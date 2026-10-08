@@ -10,6 +10,7 @@
 //! 本头部满足前十行中文注释约束。
 pub(crate) mod admin_user_queries;
 pub(crate) mod agent;
+mod heartbeat_config;
 pub(crate) mod agent_kernel_reboot;
 pub(crate) mod agent_metrics;
 pub(crate) mod agent_session_helpers;
@@ -21,6 +22,8 @@ pub(crate) mod auth_challenges;
 pub(crate) mod auth_sessions;
 pub(crate) mod bootstrap;
 pub(crate) mod core;
+pub(crate) mod deployment_task_progress;
+mod deployment_task_reports;
 pub(crate) mod deployment_task_reinstall;
 pub(crate) mod deployment_tasks;
 pub(crate) mod dirty;
@@ -30,6 +33,7 @@ pub(crate) mod line_binding;
 pub(crate) mod load;
 pub(crate) mod local_access_defaults;
 pub(crate) mod maintenance;
+mod maintenance_jobs;
 pub(crate) mod maintenance_probe_tasks;
 pub(crate) mod maintenance_usage_rollups;
 pub(crate) mod node_metrics;
@@ -45,6 +49,7 @@ pub(crate) mod routing_access_entries_rows;
 pub(crate) mod routing_access_entry_updates;
 pub(crate) mod routing_access_line_cleanup;
 pub(crate) mod routing_access_nodes_write;
+pub(crate) mod routing_endpoint_delete;
 pub(crate) mod routing_entries;
 pub(crate) mod routing_entry_cert;
 pub(crate) mod routing_entry_reality;
@@ -77,3 +82,5 @@ pub(crate) mod user_delete;
 pub(crate) mod user_devices;
 pub(crate) mod user_traffic_logs;
 pub(crate) mod users;
+
+pub(crate) mod runtime_versions;

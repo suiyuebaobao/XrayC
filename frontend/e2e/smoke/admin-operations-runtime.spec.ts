@@ -140,6 +140,8 @@ test('管理员运营中心可区分未上报、实时和旧快照状态', async
 
   runtimeMode = 'no_data';
   await page.goto('/admin/access-operations');
+  await page.getByText('展开诊断明细（10 分钟）', { exact: true }).click();
+  await page.getByRole('button', { name: '监控与保留设置', exact: true }).click();
   await expect(page.getByRole('heading', { name: '监控中心' })).toBeVisible();
   await expect(page.getByText('中转运营态')).toBeVisible();
   await expect(page.getByText('独立客户端 IP')).toBeVisible();
@@ -158,6 +160,8 @@ test('管理员运营中心可区分未上报、实时和旧快照状态', async
 
   runtimeMode = 'fresh';
   await page.goto('/admin/access-operations');
+  await page.getByText('展开诊断明细（10 分钟）', { exact: true }).click();
+  await page.getByRole('button', { name: '监控与保留设置', exact: true }).click();
   await expect(page.getByText('fresh · 实时')).toBeVisible();
   await expect(page.locator('.metric-card').filter({ hasText: '在线用户' }).locator('strong')).toHaveText('5');
   await expect(page.locator('.metric-card').filter({ hasText: '活跃连接' }).locator('strong')).toHaveText('7');
@@ -169,6 +173,8 @@ test('管理员运营中心可区分未上报、实时和旧快照状态', async
 
   runtimeMode = 'stale';
   await page.goto('/admin/access-operations');
+  await page.getByText('展开诊断明细（10 分钟）', { exact: true }).click();
+  await page.getByRole('button', { name: '监控与保留设置', exact: true }).click();
   await expect(page.locator('.runtime-card').getByText('stale · 旧快照')).toBeVisible();
   await expect(page.locator('.runtime-card').getByText('异常')).toBeVisible();
   await expect(page.locator('.runtime-card').getByText('TCP 拨测失败')).toBeVisible();

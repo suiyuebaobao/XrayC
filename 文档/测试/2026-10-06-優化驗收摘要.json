@@ -1,0 +1,142 @@
+{
+  "status": "passed",
+  "release": "2026.10.06-opt1",
+  "tests": {
+    "rust_unique": 839,
+    "frontend_unit": 87,
+    "mock_browser": 22,
+    "real_backend_browser": 3,
+    "api_crud_families": 9
+  },
+  "production": {
+    "cutover-complete": {
+      "release": "2026.10.06-opt1",
+      "jwt_rotated": true,
+      "admin_password_changed": false,
+      "other_containers_unchanged": 12,
+      "retained_containers": [
+        "xrayc-api-1-before-20261006-opt1",
+        "xrayc-worker-1-before-20261006-opt1",
+        "xrayc-caddy-1-before-20261006-opt1"
+      ],
+      "protected_history_rows": 54254,
+      "recovery_database": "xrayc_recovery_20261006_opt1",
+      "previously_active_nodes_verified": 1,
+      "verification_note": "initial comparison differed only in Docker Mounts ordering; all fields equal after destination sort",
+      "utc": "2026-10-05T20:29:09.503338+00:00"
+    },
+    "migration-verification": {
+      "business_tables": 46,
+      "identities_equal": true,
+      "accounting_users": 5,
+      "accounting_equal": true,
+      "protected_history_rows": 54254
+    },
+    "recovery-verification": {
+      "business_tables": 46,
+      "identities_equal": true,
+      "accounting_users": 5,
+      "accounting_equal": true,
+      "protected_history_rows": 0
+    },
+    "history-protection-final": {
+      "usage_ledgers": {
+        "expected": 9333,
+        "actual": 9333
+      },
+      "access_line_metric_snapshots": {
+        "expected": 7448,
+        "actual": 7448
+      },
+      "node_runtime_metrics": {
+        "expected": 14896,
+        "actual": 14896
+      },
+      "access_user_sessions": {
+        "expected": 1,
+        "actual": 1
+      },
+      "access_user_session_events": {
+        "expected": 7673,
+        "actual": 7673
+      },
+      "access_line_probes": {
+        "expected": 7448,
+        "actual": 7448
+      },
+      "access_exit_probes": {
+        "expected": 7455,
+        "actual": 7455
+      }
+    },
+    "existing-node-continuity": {
+      "previously_active_nodes": 1,
+      "continued_and_synced": 1
+    }
+  },
+  "production_ui": {
+    "passed": true,
+    "pages": [
+      {
+        "path": "/overview",
+        "heading": "总览"
+      },
+      {
+        "path": "/admin/lines",
+        "heading": "订阅线路"
+      },
+      {
+        "path": "/admin/transit-nodes",
+        "heading": "中转节点"
+      },
+      {
+        "path": "/admin/system-info",
+        "heading": "版本与运行"
+      }
+    ],
+    "pageErrors": [],
+    "serverErrors": []
+  },
+  "public_reachability": {
+    "passed": true,
+    "checks": [
+      {
+        "path": "/health",
+        "status": 200,
+        "content_type": "application/json"
+      },
+      {
+        "path": "/release.json",
+        "status": 200,
+        "content_type": "application/json"
+      },
+      {
+        "path": "/admin/transit-nodes",
+        "status": 200,
+        "content_type": "text/html; charset=utf-8"
+      }
+    ]
+  },
+  "authenticated_readiness": {
+    "login_passed": true,
+    "release": "2026.10.06-opt1",
+    "authenticated_read_paths_passed": [
+      "system-info",
+      "access-routing",
+      "users",
+      "plans",
+      "access-operations/summary",
+      "sales-landing",
+      "users/:id/traffic-logs"
+    ],
+    "correction": "user traffic query uses per-user endpoint; no global API endpoint exists",
+    "data_mutations": "only administrator login session; no CRUD fixtures"
+  },
+  "untested_external": [
+    "SSL/Cloudflare",
+    "SMTP delivery",
+    "real payment",
+    "new third-party paid exit credentials"
+  ],
+  "environment_limit": "Existing HTTP and development mode retained; JWT signing key rotated."
+}

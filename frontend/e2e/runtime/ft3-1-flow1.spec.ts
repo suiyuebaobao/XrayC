@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途：FT3-1 流1（VLESS + 限速 + 剔除）控制面真实 UI E2E（no-mock）。
  * 全程真实 admin/user 登录 + 真实页面点击 + 真实后端 + 真实 SSH 一键安装；严禁 mock/SQL 直插。
@@ -235,8 +236,8 @@ test.describe('FT3-1 流1 VLESS+限速+剔除 控制面真实操作', () => {
       expect(r.online, '已存在节点应健康').toBe(true);
       return;
     }
-    await expect(page.getByRole('button', { name: '一键安装 Agent' })).toBeVisible();
-    await page.getByRole('button', { name: '一键安装 Agent' }).click();
+    await expect(page.getByRole('button', { name: '新增中转节点', exact: true })).toBeVisible();
+    await openNodeOnboarding(page, 'automatic');
     const dialog = page.getByRole('dialog', { name: '一键安装 Agent' });
     await expect(dialog).toBeVisible();
     await formItemByLabel(page, '节点名称').locator('input').fill(NODE_NAME);

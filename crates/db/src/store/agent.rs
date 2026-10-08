@@ -146,43 +146,18 @@ impl PgStore {
         reported_node_id: Option<Uuid>,
         applied_config_hash: Option<&str>,
     ) -> Result<serde_json::Value, DbError> {
-        let block_unhealthy_lines = self.subscription_blocks_unhealthy_lines().await?;
-        self.sync_assignments_for_active_users().await?;
-        let data = self.load_store_data().await?;
-        let node_id = selected_node_id(&data, reported_node_id);
-        let node = node_id.and_then(|node_id| data.access_nodes.get(&node_id));
-        let access_config =
-            build_access_config_with_probe_policy(&data, node_id, block_unhealthy_lines);
-        let desired_config_hash = node.map(|node| {
-            access_config
-                .as_ref()
-                .map(access_config_hash)
-                .unwrap_or_else(|| empty_access_config_hash(node.id))
-        });
-
-        if let Some(node_id) = node_id {
-            sqlx::query(
-                r#"
-                UPDATE access_nodes
-                SET last_heartbeat_at = now(),
-                    desired_config_hash = COALESCE($2, desired_config_hash),
-                    applied_config_hash = COALESCE($3, applied_config_hash)
-                WHERE id = $1
-                "#,
-            )
-            .bind(node_id)
-            .bind(&desired_config_hash)
-            .bind(applied_config_hash)
-            .execute(&self.pool)
-            .await?;
-        }
-
-        let mut response = heartbeat_json_with_probe_policy(
-            &data,
-            node_id,
-            applied_config_hash,
-            block_unhealthy_lines,
-        );
+        let unchanged = if let Some(node_id) = reported_node_id {
+            self.unchanged_heartbeat_json(node_id, applied_config_hash)
+                .await?
+        } else {
+            None
+        };
+        let (mut response, node_id) = if let Some(response) = unchanged {
+            (response, reported_node_id)
+        } else {
+            self.refreshed_heartbeat_json(reported_node_id, applied_config_hash)
+                .await?
+        };
         if let Some(node_id) = node_id {
             let probe_tasks = self.pending_probe_tasks_json(node_id).await?;
             // 多域名 Phase 3:把本节点 node_domains 清单下发给 agent,供其遍历逐域名签/续证书。

@@ -384,7 +384,7 @@ impl PgStore {
                     id: row.id,
                     name: row.name,
                     is_default: row.is_default,
-                    traffic_limit_bytes: to_u64(row.traffic_limit_bytes),
+                    traffic_limit_bytes: to_traffic_limit(row.traffic_limit_bytes),
                     rate_limit_bps: to_u64(row.rate_limit_bps),
                     rate_limit_up_bps: row.rate_limit_up_bps.map(to_u64),
                     rate_limit_down_bps: row.rate_limit_down_bps.map(to_u64),
@@ -439,7 +439,7 @@ impl PgStore {
                     active: row.active,
                     expires_at: row.expires_at,
                     used_bytes: to_u64(row.used_bytes),
-                    limit_bytes: to_u64(row.limit_bytes),
+                    limit_bytes: to_traffic_limit(row.limit_bytes),
                 },
             );
         }

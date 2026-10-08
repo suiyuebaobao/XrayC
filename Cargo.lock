@@ -3265,6 +3265,7 @@ dependencies = [
  "hmac",
  "http",
  "jsonwebtoken",
+ "libc",
  "md-5",
  "rand 0.8.6",
  "reqwest",

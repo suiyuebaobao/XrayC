@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途：并行流 B 控制面全流程真实操作 E2E（真实 UI 点击 + 真实后端 no-mock + 真实 SSH 一键安装）。
  * 专攻 CF 直连（橙云）：节点在 server_4（CF 橙云机），CF 域名 DNS-01 证书，入口 VLESS/WS/TLS 监听 CF HTTPS 端口（8443）。
@@ -234,8 +235,8 @@ test.describe('Phase B 控制面全流程真实操作（CF 直连/橙云 server_
       expect(r.online, '已存在节点应健康').toBe(true);
       return;
     }
-    await expect(page.getByRole('button', { name: '一键安装 Agent' })).toBeVisible();
-    await page.getByRole('button', { name: '一键安装 Agent' }).click();
+    await expect(page.getByRole('button', { name: '新增中转节点', exact: true })).toBeVisible();
+    await openNodeOnboarding(page, 'automatic');
     const dialog = page.getByRole('dialog', { name: '一键安装 Agent' });
     await expect(dialog).toBeVisible();
 

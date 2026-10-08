@@ -2,7 +2,9 @@
 //! 本文件承载节点编辑、删除和批量删除。
 //! 删除只处理控制台数据和从属入口，远端清理必须走部署或运维脚本。
 //! 所有写操作保持事务边界，新增字段需同步前端和接口文档。
-use super::routing_access_line_cleanup::detach_usage_for_access_lines_in_tx;
+use super::routing_access_line_cleanup::{
+    detach_usage_for_access_lines_in_tx, detach_usage_for_routing_objects_in_tx,
+};
 use crate::*;
 use uuid::Uuid;
 impl PgStore {
@@ -220,7 +222,28 @@ impl PgStore {
             .fetch_one(&mut *tx)
             .await?
         };
+        // 先锁定关联出口和运行线路，阻止删除期间写入新的引用。
+        let endpoint_ids = sqlx::query_scalar::<_, Uuid>(
+            "SELECT e.id FROM exit_endpoints e JOIN exit_resources r ON r.id = e.exit_resource_id
+             WHERE r.access_node_id = ANY($1) ORDER BY e.id FOR UPDATE OF e",
+        )
+        .bind(&existing_ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        sqlx::query("SELECT id FROM access_lines WHERE id = ANY($1) ORDER BY id FOR UPDATE")
+            .bind(&deleted_access_line_ids)
+            .execute(&mut *tx)
+            .await?;
+        detach_usage_for_routing_objects_in_tx(&mut tx, &existing_ids, &endpoint_ids).await?;
         detach_usage_for_access_lines_in_tx(&mut tx, &deleted_access_line_ids).await?;
+        for endpoint_id in &endpoint_ids {
+            super::dirty::mark_nodes_dirty_for_endpoint_in_tx(
+                &mut tx,
+                *endpoint_id,
+                "admin_deleted_access_node_exit",
+            )
+            .await?;
+        }
 
         let deleted_local_resource_count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM exit_resources WHERE access_node_id = ANY($1)",

@@ -59,8 +59,8 @@ require_pattern scripts/deploy-access-agent.sh 'DEPLOY_COMPOSE_UP_ATTEMPTED=0' \
   'deploy rollback compose-attempt guard'
 require_pattern scripts/deploy-access-agent.sh 'DEPLOY_CONTAINER_NAMES_TOUCHED=0' \
   'deploy rollback container-touch guard'
-require_pattern scripts/lib/deploy-access-agent/deploy.sh 'DEPLOY_CREATED_INSTALL_DIR.*== "1".*DEPLOY_ROLLBACK_REMOVE_EXISTING' \
-  'deploy rollback default only removes run-created install dir'
+require_pattern scripts/lib/deploy-access-agent/deploy.sh 'restore_preserved_installation' \
+  'deploy rollback restores the retained installation'
 require_pattern scripts/deploy-access-agent.sh 'cleanup_all "\$status"' \
   'deploy trap passes original exit status into cleanup'
 require_pattern scripts/lib/deploy-access-agent/deploy.sh 'local status="\$\{1:-\$\?\}"' \

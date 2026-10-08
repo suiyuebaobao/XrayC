@@ -1,22 +1,13 @@
-<!--
-  本组件用于后台和用户页面顶部标题区域。
-  它只展示页面标题与说明，不包含业务请求和权限判断。
-  统一使用该组件可以保持页面头部视觉一致。
--->
+<!-- 页面标题统一控制信息层级与操作区，移动端允许按钮换行，不重复产品品牌。 -->
 <script setup lang="ts">
-defineProps<{
-  title: string;
-  description: string;
-}>();
+defineProps<{ title: string; description: string }>();
 </script>
-
 <template>
-  <div class="page-header">
-    <div>
-      <p class="eyebrow">XrayC V2</p>
+  <header class="page-header">
+    <div class="page-header__copy">
       <h1>{{ title }}</h1>
-      <p>{{ description }}</p>
+      <p v-if="description">{{ description }}</p>
     </div>
-    <slot />
-  </div>
+    <div v-if="$slots.default" class="page-header__actions"><slot /></div>
+  </header>
 </template>

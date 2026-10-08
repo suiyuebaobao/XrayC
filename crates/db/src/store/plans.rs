@@ -59,7 +59,7 @@ impl PgStore {
     pub async fn create_admin_plan_json(&self, input: AdminPlanInput) -> Result<Value, DbError> {
         let name = required_admin_text(&input.name, "套餐名称", 128)?;
         let currency = required_admin_text(&input.currency, "币种", 16)?.to_ascii_uppercase();
-        let traffic_limit_bytes = validate_non_negative_i64(input.traffic_limit_bytes, "流量额度")?;
+        let traffic_limit_bytes = validate_traffic_limit(input.traffic_limit_bytes)?;
         let rate_limit_bps = validate_non_negative_i64(input.rate_limit_bps, "套餐限速")?;
         // 方向限速覆盖:None=对称沿用 rate_limit_bps,Some(v)=该方向独立限速(v 非负;0=该方向不限)。
         let rate_limit_up_bps = input
@@ -139,7 +139,7 @@ impl PgStore {
             .transpose()?;
         let traffic_limit_bytes = input
             .traffic_limit_bytes
-            .map(|value| validate_non_negative_i64(value, "流量额度"))
+            .map(validate_traffic_limit)
             .transpose()?;
         let rate_limit_bps = input
             .rate_limit_bps

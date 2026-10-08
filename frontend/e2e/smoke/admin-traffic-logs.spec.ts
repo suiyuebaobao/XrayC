@@ -104,7 +104,7 @@ test('管理员后台流量日志页按用户展示明细', async ({ page }) => 
   });
 
   await page.goto('/admin/users');
-  await page.locator('.shell__menu').getByText('用户流量日志').click();
+  await page.getByRole('link', { name: '流量明细', exact: true }).click();
   await expect(page.getByRole('heading', { name: '用户流量日志' })).toBeVisible();
   await expect(page.getByText('legacy@example.test').first()).toBeVisible();
   await expect.poll(() => trafficLogsLoaded).toBe(true);

@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途:验证「公网地址 / 客户连接地址」冗余字段已从两个建节点弹窗移除,
  * 且提交时 public_host 由三个对外直连地址按 IP直连>域名直连>CF域名 自动推导。
@@ -34,7 +35,7 @@ test('一键安装与新增节点弹窗去除公网地址,public_host 由直连�
   await page.goto('/admin/transit-nodes');
 
   // —— 一键安装 Agent 弹窗:不应再有「公网地址」输入,三地址仍在 ——
-  await page.getByRole('button', { name: '一键安装 Agent' }).first().click();
+  await openNodeOnboarding(page, 'automatic');
   const oc = page.getByRole('dialog', { name: '一键安装 Agent' });
   await expect(oc).toBeVisible();
   await expect(oc.getByText('公网地址', { exact: true })).toHaveCount(0);
@@ -44,8 +45,8 @@ test('一键安装与新增节点弹窗去除公网地址,public_host 由直连�
   await expect(oc).toBeHidden();
 
   // —— 新增中转节点弹窗:不应再有「客户连接地址」输入 ——
-  await page.getByRole('button', { name: '新增中转节点' }).first().click();
-  const dlg = page.getByRole('dialog', { name: '新增中转节点' });
+  await openNodeOnboarding(page, 'existing');
+  const dlg = page.getByRole('dialog', { name: '接入已有 Agent' });
   await expect(dlg).toBeVisible();
   await expect(dlg.getByText('客户连接地址', { exact: true })).toHaveCount(0);
   await expect(dlg.getByText('IP 直连地址')).toBeVisible();

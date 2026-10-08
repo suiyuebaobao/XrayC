@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途：Phase A 控制面全流程真实操作 E2E（真实 UI 点击 + 真实后端 no-mock + 真实 SSH 一键安装）。
  * 全程走真实管理员/用户登录与真实页面点击，严禁 mock/SQL 直插；远端一键安装是真实 SSH 部署。
@@ -157,8 +158,8 @@ test.describe('Phase A 控制面全流程真实操作', () => {
       expect(r.online, '已存在节点应健康').toBe(true);
       return;
     }
-    await page.getByRole('button', { name: '新增中转节点' }).click();
-    const dialog = page.getByRole('dialog', { name: '新增中转节点' });
+    await openNodeOnboarding(page, 'existing');
+    const dialog = page.getByRole('dialog', { name: '接入已有 Agent' });
     await expect(dialog).toBeVisible();
     await formItemByLabel(page, '节点名称').locator('input').fill(NODE_NAME);
     // 「客户连接地址」输入框已移除：public_host 由 IP直连>域名直连>CF域名 自动推导。
@@ -210,8 +211,8 @@ test.describe('Phase A 控制面全流程真实操作', () => {
     test.setTimeout(HEARTBEAT_TIMEOUT_MS + 120_000);
     await adminLogin(page);
     await page.goto('/admin/transit-nodes');
-    await expect(page.getByRole('button', { name: '一键安装 Agent' })).toBeVisible();
-    await page.getByRole('button', { name: '一键安装 Agent' }).click();
+    await expect(page.getByRole('button', { name: '新增中转节点', exact: true })).toBeVisible();
+    await openNodeOnboarding(page, 'automatic');
     const dialog = page.getByRole('dialog', { name: '一键安装 Agent' });
     await expect(dialog).toBeVisible();
 

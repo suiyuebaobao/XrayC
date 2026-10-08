@@ -63,6 +63,7 @@ mod entry_cdn_detect;
 mod epay;
 mod guards;
 mod operations;
+mod system_info;
 #[cfg(test)]
 mod operations_platform_metrics_tests;
 mod payment;
@@ -142,6 +143,7 @@ pub(crate) use state::{AuthResponsePolicy, RateLimitScope};
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/api/admin/system-info", get(system_info::system_info))
         .route("/sub/:token", get(download_subscription))
         .route(
             "/api/deploy/artifacts/:artifact_name",

@@ -39,7 +39,10 @@ export type SalesLandingFaq = {
   answer: string;
 };
 
+export type PortalFeatures = { plans: boolean; orders: boolean; redeem: boolean; invites: boolean; marketing: boolean };
+
 export type SalesLandingConfig = {
+  portalFeatures?: PortalFeatures;
   eyebrow: string;
   title: string;
   subtitle: string;

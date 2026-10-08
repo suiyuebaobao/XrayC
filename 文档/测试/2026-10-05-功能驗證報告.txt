@@ -1,0 +1,226 @@
+XrayC 遠端開發環境與功能驗證報告
+日期：2026-10-05（Asia/Taipei）
+
+一、結論與範圍
+已部署 1 台主控、3 台獨立節點；主控另保留 1 個同機驗證 Agent。
+最後檢查：API、Worker、PostgreSQL、Caddy 全部 healthy；4 個 Agent 全部 healthy、config_dirty=false；現行訂閱 HTTP 200。
+已完成下列資源的增刪改查、真實跨機流量與備份還原測試。發現的問題沒有計為通過，缺少外部條件的項目沒有冒充實測。
+本報告不是「所有功能零缺陷」或正式生產發布認證。API 清單附於文末，清單存在不等於每種參數、HTTP 別名及組合皆已測試。
+
+二、自動化結果
+• Rust workspace：710 通過、0 失敗；使用獨立 PostgreSQL 測試資料庫，非僅略過資料庫的單元測試。測試庫已刪除。
+• 前端 Vitest：75 通過。
+• Playwright：24 個案例累計通過。初次 17 通過、7 失敗；修正測試程式後只重跑失敗案例，沒有重跑整套冒稱單次 24 全綠。
+• 初次實際瀏覽器登入與 11 個管理頁面檢查：無頁面程式例外／失敗 HTTP；refresh 與登出行為已驗證。
+• 一次 SSH 通道中斷造成的測試失敗不當作產品缺陷；修復通道後完成對應案例。
+
+三、資源增刪改查與關聯
+符號說明：C=新增、R=查詢、U=修改、D=刪除。沒有對應產品功能者標示「未提供」，不虛構測試。
+
+接入節點：C/R/U/D、單筆及批次刪除、刪除後查無資料通過。
+節點網域：增加、讀取、替換、移除通過；使用離線測試節點驗證資料，不代表真實 TLS 連線通過。
+入口：C/R/U/D 通過；刪除入口連帶移除綁定。
+入口出口綁定：C/R/U/D 通過；刪除後原憑證停止工作，其他綁定仍可用。
+出口資源：C/R/U 通過；無獨立 DELETE 路由，刪除最後端點時自動刪除空資源，已驗證。
+出口端點：C/R/U/D 通過；停用及重新啟用的實際線路恢復存在問題，見第五節。
+節點本機出口：C/R/U/D 通過；修改欄位為 endpoint_name。
+線路群組：C/R/U/D、綁定節點關聯通過。
+訂閱規則庫：C/R/U/D、群組規則關聯通過。
+套餐：C/R/U/D（軟刪除）、上下行限速欄位、群組授權與倍率設定通過。
+使用者：C/R/U/D、批次刪除、改套餐、停用／恢復、管理員重設密碼通過；舊密碼拒絕、新密碼可登入。
+邀請碼：新增、讀取、註冊消耗、自助生成、刪除未使用碼通過；已使用碼拒絕刪除。需同時啟用自助生成及提供配額。無一般修改碼內容功能。
+兌換碼：新增、讀取、兌換入帳及重複兌換拒絕通過；未提供一般 U/D 路由。
+訂單：建立待付款訂單、使用者／管理端查詢通過；未提供任意 U/D。真實支付及回呼未測。
+部署任務：安裝指南建立、進度回報、查詢、取消、刪除通過。取消狀態契約是 failed，原因「管理员取消」。
+一鍵安裝：4 個實際安裝任務完成；新節點事先配置 Docker／SSH 通道，並提前使用綁定 API 解除等待設定的延遲，不能算完全無人干預的裸機安裝測試。
+設定項目：銷售頁、訂閱、安全驗證、支付開關、備份政策、探測政策完成讀取／修改／讀回；測試用變更已恢復。單例設定無一般 C/D。
+唯讀資料：稽核、裝置/IP、流量紀錄、帳本排行、主機／資料庫指標、監控與部署歷史已查詢。
+探測：手動出口探測及運維探測已實際排程。
+
+四、真實資料面與安全行為
+1. 跨機與協定
+五條初始跨機路徑均 HTTP 200、下載 1,048,576 bytes，包含 3 台獨立節點及主控入口。普通 VLESS 臨時路徑後來用於刪除撤銷測試並移除。
+自建出口 SOCKS5、HTTP、VLESS Reality、Shadowsocks 均完成真實流量。
+入口／傳輸包含普通 TCP、Reality TCP、普通 WebSocket、普通 gRPC、普通 XHTTP、Reality gRPC、Reality XHTTP、Shadowsocks 2022。
+新增的五種傳輸各 HTTP 200、16,384 bytes；三種新增出口各 HTTP 200、65,536 bytes。
+Xray 26.5.9 與原生 Mihomo v1.19.32 實測；Mihomo 完整產生設定語法檢查通過，XHTTP Reality、普通 gRPC、SS2022 各 HTTP 200、65,536 bytes。
+量子加密 VLESS：原生 Xray 與原生 Mihomo 各 HTTP 200、65,536 bytes。
+上述為特定實測組合通過，不代表所有入口×出口×傳輸排列皆測過。
+
+2. UDP
+node-1 → SS2022 node-3 → SOCKS node-2 → UDP echo node-3：8/8 封包成功。
+主控直達 node-3 的 UDP 與由主控發起的代理 UDP 逾時；node-1、node-2 直達則成功。原因尚未定位，不能斷言供應商封鎖或產品缺陷。
+
+3. 限速、配額與帳務
+主控 Ubuntu 核心支援 connmark 的環境：設定下載 1,000,000 bps，2 MiB 實測 18.613930 秒、112,665 B/s（約 0.901 Mbps）；上傳 512,000 bps，1 MiB 實測 17.851220 秒、58,739 B/s（約 0.470 Mbps）。
+真實流量耗盡配額後代理憑證被撤銷；恢復配額後可連線。
+2 倍計費實際帳本：delta_total=65,746、billing_multiplier=2.000、billed_bytes=131,492，符合兩倍。
+收尾：套餐恢復 2 GiB，倍率 1 倍，使用者啟用，個別上下行限速覆寫恢復 null。已消耗的真實測試流量保留為證據。
+TCP+UDP 同時流量共享限速未完成定量測試，不能由單獨 TCP／UDP 通過推定。
+
+4. 身分、訂閱及撤銷
+匿名存取管理 API 回 401；普通使用者回 403。
+算術驗證碼錯答拒絕，正確新題可登入；註冊與邀請消耗通過。
+登出清除本機登入狀態，refresh 回 401。
+使用者與管理員訂閱 token 重設均有測試；最後一輪舊訂閱 HTTP 404、新訂閱 HTTP 200，舊代理憑證失效、新憑證可連線。
+稽核抽樣 200 筆字串欄位，未發現提供的 SSH 密碼、Agent token、現行訂閱 token；這是抽樣結果，不是完整資訊安全審計。
+
+5. 備份與還原
+本機排程／手动 pg_dump 成功；備份還原到獨立資料庫，當時包含 47 張表、2 位使用者、3 個套餐。
+異地 SSH 自動配置及備份傳送至 node-3 成功，offsite_synced=true；最後將全量目的地恢復 local。
+WAL base backup 成功；實際建立 PostgreSQL named restore point，寫入 before/after 標記，在隔離複本恢復到 before，主庫維持 after；恢復複本完成 promote，標記與複本已清除。
+此為隔離還原驗證，沒有破壞性覆蓋現行主庫。
+最後全量與 WAL 狀態均 success；WAL enabled/configured=true。
+
+五、確認的問題與目前處置
+A. 出口重新啟用未恢復線路（未修復產品程式）
+出口停用後重新啟用，部分資料仍為 access_lines.enabled=false，即使 binding.enabled 與 endpoint.enabled 已為 true。造成訂閱缺少原有線路；等待同步仍未恢復。
+已透過官方 PUT 重新儲存受影響綁定恢復測試環境。這是繞過方式，不是根治。後續應修正出口更新與執行期線路狀態同步。
+
+B. 重啟任務成功狀態不代表真的重啟（未修復產品程式）
+node-3 實際回報 reboot_status=success，但訊息為「重启自检通过;重启命令未配置,未实际重启」。
+實際主機重啟未測；需要配置可執行命令，並避免把僅自檢通過視作已重啟。
+
+C. AlmaLinux 核心缺少下載限速能力
+三台 AlmaLinux 9.7、5.14.0-611.55.1.el9_7.x86_64 核心 CONFIG_NET_ACT_CONNMARK 未啟用，modprobe 無法載入；IFB 可用。
+Agent 正確回報 kernel_connmark_available=false，下載限速會降級。Ubuntu 主控支援此功能，TCP 限速測試在主控完成。
+節點已設定 XRAYC_KERNEL_UPGRADE_COMMAND= 空值，避免無效的自動升級嘗試；沒有宣稱替換核心或解決三台節點的下載限速。
+
+D. 全新部署 WAL 設定缺口（本環境已手動補齊）
+archive_mode 已開，但 wal.configured 未自動成為 true，執行請求未真正執行；PostgreSQL pg_hba 也缺少 Worker 網段複寫授權。
+驗證 archive_mode/wal_level 後補 configured 與限制於 Compose 子網的 scram-sha-256 replication 規則，reload 後 WAL 與 PITR 成功。尚未把這些處置納入通用部署程式。
+
+E. 主控 UDP 路徑問題
+已隔離出主控直達 UDP 也失敗；節點來源可通。尚未定位根因，詳見第四節，不計入已修復項目。
+
+六、依使用者同意列為未測／有條件限制
+• 真實網域 TLS 申請與續期、Cloudflare DNS-01／橘雲代理、網域輪替後實際流量：無網域及私有設定。
+• TLS Trojan、Hysteria2 的真實入口與 TLS 本機出口：缺少網域／憑證。
+• SMTP 註冊／重設密碼驗證信，以及加密／分片備份郵件：無郵件設定；不將管理員重設密碼等同電子郵件流程。
+• Alipay／Epay 真實付款、簽名回呼與資金核對：無商戶測試設定。WeChat 支付是尚未實作的佔位，並非補憑證即可使用。
+• 第三方供應商出口：無供應商憑證；已測的是自有伺服器上的四種出口。
+• 主機真的重啟：未配置執行命令。
+• TCP+UDP 同時共享限速、長時間穩定性、大流量壓測、高可用切換、完整 make check-real-release：未執行。
+• HTTP 方法別名、所有參數邊界與協定排列並未逐一窮舉；附錄僅供後续覆蓋追蹤。
+
+七、測試程式維護與排除的誤判
+只修改前端測試，沒有修改 Rust 或業務邏輯：
+frontend/e2e/helpers/smoke.ts：补充入口／出口資源 mock。
+frontend/e2e/runtime-no-mock.spec.ts：移除過時的月帳單卡片預期。
+frontend/e2e/smoke/admin-core.spec.ts：部署任務文字精確匹配。
+frontend/e2e/smoke/admin-transit-node-crud-part2.spec.ts：Trojan 下拉選項限定到目前展開的選單。
+frontend/e2e/runtime/runtime-api.ts：等待可讀取回應內容，避免舊輪詢被取消後解析失敗；不再用空資料掩蓋 JSON 錯誤。
+測試修正已同步遠端 source。另更新 .gitignore/.dockerignore，排除帳號密碼 TXT/RTF。
+早期 literal security="none"、本機出口 name 欄位、任務取消狀態、邀請額度、監控時間參數、備份 mode 位置等為測試請求誤用，已依產品契約更正；不列為產品問題。
+
+八、保留環境與證據
+面板：http://localhost:18080/admin/login（本機 SSH 通道；無公開面板網域）。
+遠端部署：/opt/xrayc-dev-20261005；各節點 Agent 位於其 access-agent 子目錄。
+原有 3x-ui／相關服務已按授權移除，節點備份保存在 /opt/xrayc-dev-20261005/previous-services/original-services.tar.gz。
+節點到主控的限制轉發使用 xrayc-control-tunnel.service；SSH 密碼登入保留。
+暫存流量產生器、代理測試客戶端、獨立測試資料庫與 PITR 複本已清理，Worker tick 恢復 60 秒。
+節點測試來源限制保留；node-3 的 SS2022 19444 TCP/UDP 已放行，可作為保留驗證入口。其餘測試線路仍受原有測試來源／SSH 通道限制，不代表全部可直接從任意外網連線。
+帳密及連線說明：文档/私有/2026-10-05-開發環境連線資料.txt。
+重開本機通道：python3 文档/私有/啟動開發通道.py。
+原始測試證據：文档/私有/2026-10-05-測試證據/（僅擁有者可讀，可能含內部位址／測試資料，不宜公開）。
+原始紀錄保留了初次失敗；以本報告說明的更正／針對性重測結果判讀，不刪掉失敗紀錄製造全綠。
+
+九、完整 API 路由盤點（僅清單，不等於每條分支全部實測）
+共 97 條路徑、126 個 HTTP 方法宣告。
+GET /health
+GET /sub/:token
+GET /api/deploy/artifacts/:artifact_name
+GET /api/auth/security
+GET /api/auth/captcha
+POST /api/auth/email-code
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/refresh
+POST /api/auth/logout
+GET /api/sales-landing
+GET /api/plans
+GET /api/user/me
+GET /api/user/usage
+GET,POST /api/user/invite-codes
+GET,POST /api/orders
+POST /api/payment/callback
+POST /api/payment/alipay/notify
+POST /api/payment/epay/notify
+POST /api/payment/wechat/notify
+GET /api/payment/channels
+POST /api/redeem
+POST /api/user/subscription/token/reset
+POST /api/user/password/send-code
+POST /api/user/password
+GET,POST /api/admin/users
+POST /api/admin/users/batch-delete
+GET,PATCH,DELETE /api/admin/users/:user_id
+GET /api/admin/users/:user_id/subscription
+GET /api/admin/users/:user_id/traffic-logs
+GET /api/admin/users/:user_id/devices
+POST /api/admin/users/:user_id/subscription-token/reset
+POST /api/admin/users/:user_id/reset-password
+GET /api/admin/orders
+GET,POST /api/admin/redeem-codes
+GET,POST /api/admin/invite-codes
+DELETE /api/admin/invite-codes/:code
+GET,PUT /api/admin/auth-security
+GET,PUT /api/admin/payment-settings
+GET,PUT /api/admin/subscription-settings
+GET,POST /api/admin/subscription-rule-sets
+PUT,DELETE /api/admin/subscription-rule-sets/:rule_set_id
+GET,PUT /api/admin/sales-landing
+GET /api/admin/audit-logs
+GET,PUT /api/admin/backup/config
+POST /api/admin/backup/test-and-provision
+POST /api/admin/backup/run-now
+GET /api/admin/backup/state
+GET,POST /api/admin/access-nodes
+POST /api/admin/access-nodes/batch-delete
+POST /api/admin/access-nodes/:access_node_id/tls/renew
+POST /api/admin/access-nodes/:access_node_id/reboot
+POST /api/admin/access-nodes/one-click-install
+PUT,DELETE /api/admin/access-nodes/:access_node_id
+POST /api/admin/access-nodes/install-guide
+GET /api/admin/deployment-tasks
+DELETE /api/admin/deployment-tasks/:task_id
+POST /api/admin/deployment-tasks/:task_id/cancel
+POST /api/deployment-tasks/:task_id/report
+GET,POST /api/admin/access-nodes/:access_node_id/local-exit-lines
+PUT,DELETE /api/admin/access-nodes/:access_node_id/local-exit-lines/:exit_endpoint_id
+GET /api/admin/access-routing
+GET,POST /api/admin/access-entries
+POST /api/admin/access-entries/:access_entry_id/exit-bindings
+PUT,DELETE /api/admin/access-entries/:access_entry_id
+GET /api/admin/access-entry-exit-bindings
+PUT,DELETE /api/admin/access-entry-exit-bindings/:binding_id
+GET /api/admin/access-lines
+GET /api/admin/access-lines/:access_line_id/sessions
+GET /api/admin/access-lines/:access_line_id/metrics
+GET,POST /api/admin/exit-resources
+PUT /api/admin/exit-resources/:exit_resource_id
+GET,POST /api/admin/exit-endpoints
+PUT,DELETE /api/admin/exit-endpoints/:exit_endpoint_id
+POST /api/admin/exit-endpoints/:exit_endpoint_id/probe
+GET /api/admin/exit-pools
+POST /api/admin/line-groups
+PUT,DELETE /api/admin/line-groups/:line_group_id
+PUT /api/admin/line-groups/:line_group_id/lines
+PUT /api/admin/line-groups/:line_group_id/binding-nodes
+GET,POST /api/admin/plans
+PATCH,PUT,DELETE /api/admin/plans/:plan_id
+PUT /api/admin/plans/:plan_id/line-groups
+GET /api/user/subscription
+GET /api/admin/access-operations/summary
+GET /api/admin/access-operations/ledger-ranking
+GET,PUT /api/admin/access-operations/settings
+POST /api/admin/access-operations/probe
+GET /api/admin/access-operations/platform-metrics
+GET /api/admin/monitor/node-traffic
+GET /api/admin/monitor/node-traffic/:node_id/trend
+POST /api/agent/access/heartbeat
+POST /api/agent/access/config-result
+POST /api/agent/access/traffic
+POST /api/agent/access/metrics
+POST /api/agent/access/sessions
+POST /api/agent/access/probes

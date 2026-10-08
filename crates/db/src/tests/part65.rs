@@ -63,6 +63,7 @@ async fn test_pg_node_runtime_metrics_table_exists_and_idempotent_when_database_
             "id".to_string(),
             "mem_total_bytes".to_string(),
             "mem_used_bytes".to_string(),
+            "preserve_on_cleanup".to_string(),
         ]
     );
 }

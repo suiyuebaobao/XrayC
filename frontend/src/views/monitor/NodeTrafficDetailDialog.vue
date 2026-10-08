@@ -113,6 +113,10 @@ function barTooltip(bar: (typeof bars.value)[number]): string {
         :closable="false"
       />
 
+      <el-alert v-if="(trend?.partialArchivedHours ?? 0) > 0" type="warning" show-icon :closable="false"
+        title="所选边界落在历史汇总时段内，统计未包含这些不完整小时。选择整点边界可查看完整统计。" />
+      <p class="muted">较早流量按小时汇总保存，线路删除后仍保留历史用量。</p>
+
       <!-- 中间：区间上/下/总汇总数字 -->
       <dl class="node-traffic-detail__summary">
         <div>

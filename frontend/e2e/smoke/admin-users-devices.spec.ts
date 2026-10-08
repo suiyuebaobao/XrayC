@@ -80,7 +80,8 @@ test('管理员查看用户设备管理中的订阅拉取和节点使用 IP', as
 
   await page.goto('/admin/users');
   await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible();
-  await page.locator('tr', { hasText: 'device-user@example.test' }).getByRole('button', { name: '设备管理' }).click();
+  await page.locator('tr', { hasText: 'device-user@example.test' }).getByRole('button', { name: '更多用户操作' }).click();
+  await page.getByRole('menuitem', { name: '访问 IP' }).click();
 
   await expect.poll(() => devicesLoaded).toBe(true);
   const drawer = page.getByRole('dialog', { name: /设备管理：device-user@example.test/ });

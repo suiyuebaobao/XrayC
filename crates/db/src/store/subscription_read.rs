@@ -74,6 +74,7 @@ impl PgStore {
         };
         let upload = 0_i64;
         let download = row.used_bytes.max(0);
+        // 客户端以 total=0 表示没有流量上限，期限仍由 expire 指定。
         let total = row.limit_bytes.max(0);
         Ok(format!(
             "upload={}; download={}; total={}; expire={}",

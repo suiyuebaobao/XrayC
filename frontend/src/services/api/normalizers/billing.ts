@@ -302,7 +302,9 @@ export function normalizeSubscriptionSettings(data: Record<string, unknown>): Su
 
 export function normalizePlan(value: unknown): PlanInfo {
   const data = recordValue(value);
-  const trafficLimitBytes = numberValue(data.trafficLimitBytes ?? data.traffic_limit_bytes);
+  const rawTrafficLimitBytes = numberValue(data.trafficLimitBytes ?? data.traffic_limit_bytes);
+  // 公共套餐来自内存模型(u64::MAX)，管理接口使用数据库 -1 标记。
+  const trafficLimitBytes = rawTrafficLimitBytes === Number('18446744073709551615') ? -1 : rawTrafficLimitBytes;
   const rateLimitBps = numberValue(data.rateLimitBps ?? data.rate_limit_bps);
   // 方向限速可空：null=该方向沿用对称 rate_limit_bps，Some(v)=该方向独立限速。
   const rateLimitUpBps = nullableBps(data.rateLimitUpBps ?? data.rate_limit_up_bps);
@@ -315,7 +317,7 @@ export function normalizePlan(value: unknown): PlanInfo {
     isDefault: data.isDefault === true || data.is_default === true,
     enabled: data.enabled !== false,
     trafficLimitBytes,
-    trafficLimitGb: bytesToGb(trafficLimitBytes),
+    trafficLimitGb: trafficLimitBytes === -1 ? -1 : bytesToGb(trafficLimitBytes),
     rateLimitBps,
     rateLimitMbps: bpsToMbps(rateLimitBps),
     rateLimitUpBps,
@@ -336,7 +338,7 @@ export function normalizePlan(value: unknown): PlanInfo {
 
 export function serializeAdminPlanPayload(payload: AdminPlanPayload) {
   // 用户未改流量字段时优先回传原始精确字节，避免 bytes→GB→bytes 往返把非整 GB 套餐悄悄改额度。
-  const trafficLimitBytes = Number.isFinite(payload.trafficLimitBytesExact)
+  const trafficLimitBytes = payload.trafficLimitGb === -1 ? -1 : Number.isFinite(payload.trafficLimitBytesExact)
     ? Math.round(Math.max(0, payload.trafficLimitBytesExact as number))
     : gbToBytes(payload.trafficLimitGb);
   return {
@@ -418,8 +420,8 @@ export function normalizeUserUsageSummary(data: Record<string, unknown>): UserUs
   };
 }
 
-export function subscriptionSettingsPayload(payload: SubscriptionSettings) {
-  return {
+export function subscriptionSettingsPayload(payload: Partial<SubscriptionSettings>) {
+  const fields = {
     mixed_port: payload.mixedPort,
     allow_lan: payload.allowLan,
     mode: payload.mode,
@@ -434,6 +436,8 @@ export function subscriptionSettingsPayload(payload: SubscriptionSettings) {
     auto_test_interval_seconds: payload.autoTestIntervalSeconds,
     block_unhealthy_lines: payload.blockUnhealthyLines,
   };
+  // 不提交未编辑的字段；false、0 与空规则数组仍是有效更新。
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 }
 
 function normalizePlanLineGroups(

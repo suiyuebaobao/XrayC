@@ -271,7 +271,11 @@
         assert!(result.expired_login_guards >= 1);
         assert!(result.queued_exit_probe_tasks >= 1);
         assert!(result.pruned_metric_snapshots >= 1);
-        assert!(result.pruned_traffic_snapshots >= 1);
+        assert_eq!(result.pruned_traffic_snapshots, 0);
+        let retained_baseline = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM access_traffic_snapshots WHERE access_line_id=$1 AND xray_user_key='worker-test-user'",
+        ).bind(line_id).fetch_one(store.pool()).await.unwrap();
+        assert_eq!(retained_baseline, 1, "累计计数基准不是可过期日志");
         assert!(result.pruned_user_sessions >= 1);
         assert!(result.pruned_user_session_events >= 1);
         assert!(result.pruned_line_probes >= 1);

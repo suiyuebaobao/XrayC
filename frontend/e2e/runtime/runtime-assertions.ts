@@ -22,7 +22,7 @@ export async function expectVisibleText(page: Page, text: string | RegExp) {
 }
 
 export async function expectMetricCard(page: Page, label: string, value: string | RegExp) {
-  const card = page.locator('.metric-card').filter({ hasText: label }).first();
+  const card = page.locator('.metric-card, .overview-metrics > article').filter({ hasText: label }).first();
   await expect(card).toBeVisible();
   await expect(card.locator('strong').filter({ hasText: value }).first()).toBeVisible();
 }
@@ -246,7 +246,7 @@ export async function assertAdminPlanRows(page: Page, plans: PlanInfo[]) {
 }
 
 async function expectMetricCardNotValue(page: Page, label: string, value: string) {
-  const card = page.locator('.metric-card').filter({ hasText: label }).first();
+  const card = page.locator('.metric-card, .overview-metrics > article').filter({ hasText: label }).first();
   await expect(card).toBeVisible();
   await expect(card.locator('strong')).not.toHaveText(value);
 }

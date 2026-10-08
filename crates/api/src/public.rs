@@ -51,6 +51,8 @@ pub(crate) async fn health() -> Json<serde_json::Value> {
         "success": true,
         "service": "xrayc-api",
         "stack": "rust-axum",
+        "package_version": env!("CARGO_PKG_VERSION"),
+        "release_id": option_env!("XRAYC_BUILD_ID").unwrap_or("development"),
     }))
 }
 

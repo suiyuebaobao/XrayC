@@ -40,13 +40,13 @@ pub(super) async fn execute_reboot_task(
         }
     }
 
-    // 自检全过:下达宿主 reboot。命令为空(测试)则只回报成功不真重启。
+    // 自检通过仍不代表重启已执行；缺少命令必须如实失败。
     let command = settings.host_reboot_command.trim();
     if command.is_empty() {
-        info!("整机重启自检通过,但重启命令为空,仅回报成功不实际重启(测试/特殊部署)");
+        warn!("整机重启命令未配置,未实际重启");
         return RebootResult {
             request_id: task.request_id,
-            status: "success".to_owned(),
+            status: "failed".to_owned(),
             message: "重启自检通过;重启命令未配置,未实际重启".to_owned(),
         };
     }

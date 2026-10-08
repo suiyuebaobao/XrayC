@@ -390,5 +390,12 @@ async fn sync_access_lines_for_entry_in_tx(
     .bind(access_entry_id)
     .execute(&mut **tx)
     .await?;
+    let pool_ids = sqlx::query_scalar::<_, Uuid>(
+        "SELECT DISTINCT exit_pool_id FROM access_entry_exit_bindings WHERE access_entry_id = $1",
+    )
+    .bind(access_entry_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    super::line_binding::prune_unusable_exit_pool_lines_in_tx(tx, &pool_ids).await?;
     Ok(())
 }

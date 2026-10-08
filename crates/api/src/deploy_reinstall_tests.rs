@@ -1,5 +1,5 @@
 //! 一键安装健壮性回归测试:就绪等待超时降级 + 重装熔断。
-//! 缺陷②:进度回报跳过/就绪等待超时让脚本非 0 退出但鉴权码已输出,不得据此判失败。
+//! 非致命就绪等待由脚本转为警告；真正失败或回退即使曾打印鉴权码也不能宣称安装成功。
 //! 缺陷②:同一 SSH 目标短时间内强制重装次数达上限必须熔断,杜绝自伤式重装风暴。
 //! 测试使用 PostgreSQL 真实迁移和 demo 管理员登录,DATABASE_URL 缺失时跳过。
 //! 一键安装 SSH 走 cfg(test) 假输出,通过 XRAYC_ONE_CLICK_INSTALL_FAKE_* 注入退出码/输出。
@@ -16,11 +16,9 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn test_pg_one_click_install_succeeds_when_script_exits_nonzero_but_emits_auth_code_when_database_url_is_set(
+async fn test_pg_one_click_install_rejects_failed_script_even_with_auth_code_when_database_url_is_set(
 ) {
-    // 缺陷②回归:就绪等待超时/进度回报跳过会让安装脚本以非 0 退出,但容器已 running、
-    // 鉴权码已先输出。成功判定以"鉴权码解析到"(agent 会凭心跳收敛)为准,不得据脚本非 0 退出判 failed,
-    // 否则调用方据 failed 强制重装会把快装好的 agent 清掉重来 → 自伤式重装风暴。
+    // 失败脚本可能已经恢复旧实例，鉴权码只证明曾执行到某个步骤。
     let Ok(database_url) = std::env::var("DATABASE_URL") else {
         eprintln!("DATABASE_URL not set; skipping one-click nonzero-exit downgrade test");
         return;
@@ -77,7 +75,7 @@ async fn test_pg_one_click_install_succeeds_when_script_exits_nonzero_but_emits_
     .await;
     assert_eq!(queued.0, StatusCode::OK, "{}", queued.1);
 
-    let mut succeeded = false;
+    let mut failed = false;
     for _ in 0..40 {
         let tasks = request_json(
             app.clone(),
@@ -94,27 +92,25 @@ async fn test_pg_one_click_install_succeeds_when_script_exits_nonzero_but_emits_
             .iter()
             .find(|item| item["safe_metadata"]["access_node_name"] == "one-click-downgrade-node")
         {
-            // 关键断言:脚本非 0 退出 + 鉴权码已输出,任务最终必须 succeeded,绝不 failed。
-            assert_ne!(
-                task["status"], "failed",
-                "鉴权码已解析到时绝不能判 failed(否则触发自伤式重装): {task}"
-            );
-            if task["status"] == "succeeded" {
-                succeeded = true;
+            if task["status"] == "failed" {
+                failed = true;
                 break;
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    assert!(
-        succeeded,
-        "脚本非 0 退出但已输出鉴权码时,一键安装任务应降级为 succeeded 并登记节点"
-    );
-
     std::env::remove_var("DEPLOY_ARTIFACT_TOKEN");
     std::env::remove_var("XRAYC_ONE_CLICK_INSTALL_FAKE_OUTPUT");
     std::env::remove_var("XRAYC_ONE_CLICK_INSTALL_FAKE_STDERR");
     std::env::remove_var("XRAYC_ONE_CLICK_INSTALL_FAKE_FAILED");
+    assert!(failed, "脚本失败必须如实失败，不得仅凭鉴权码登记成功");
+    let registered =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM access_nodes WHERE id=$1)")
+            .bind(installed_node_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert!(!registered);
 }
 
 #[tokio::test]

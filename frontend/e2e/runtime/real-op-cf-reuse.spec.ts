@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途：server_4（Cloudflare 橙云）CF 真实流量 E2E —— 真实 UI 点击 + 真实后端 no-mock + 真实 SSH 一键安装。
  * 关键：无 CF API Token 时，agent 经 CF 橙云 :80 反代做 HTTP-01，给 CF 域名各签【自有】证书（per-domain，绝不复用直连灰云证书；用户 2026-06-29 定）。
@@ -215,8 +216,8 @@ test.describe('CF 橙云真实流量（无 token，per-domain HTTP-01 穿 CF，�
       expect(r.online).toBe(true);
       return;
     }
-    await expect(page.getByRole('button', { name: '一键安装 Agent' })).toBeVisible();
-    await page.getByRole('button', { name: '一键安装 Agent' }).click();
+    await expect(page.getByRole('button', { name: '新增中转节点', exact: true })).toBeVisible();
+    await openNodeOnboarding(page, 'automatic');
     const dialog = page.getByRole('dialog', { name: '一键安装 Agent' });
     await expect(dialog).toBeVisible();
 

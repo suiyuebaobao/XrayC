@@ -4,12 +4,18 @@
   页面不得展示第三方出口真实地址或上游凭据。
 -->
 <script setup lang="ts">
-import { DocumentCopy, RefreshRight } from '@element-plus/icons-vue';
+import { DocumentCopy, RefreshRight, Refresh } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, onMounted, ref } from 'vue';
+import { usePortalFeaturesStore } from '@/stores/portalFeatures';
+import { useSessionStore } from '@/stores/session';
 import PageHeader from '@/components/PageHeader.vue';
-import { apiClient, type SubscriptionInfo, type UserUsageSummary } from '@/services/api';
+import { apiClient, type SubscriptionInfo, type UserUsageSummary, type OrderInfo } from '@/services/api';
 
+const portal = usePortalFeaturesStore();
+const session = useSessionStore();
+const orders = ref<OrderInfo[]>([]);
+const ordersError = ref('');
 const loading = ref(true);
 const resetting = ref(false);
 const subscription = ref<SubscriptionInfo>();
@@ -35,19 +41,21 @@ const usageCards = computed(() => [
   {
     label: '套餐总流量已用',
     value: `${formatGb(totalTraffic.value.used)} GB`,
-    hint: `配额 ${formatGb(totalTraffic.value.total)} GB`,
+    hint: totalTraffic.value.total === -1 ? '不限流量' : `配额 ${formatGb(totalTraffic.value.total)} GB`,
   },
 ]);
 
-onMounted(loadSubscription);
+onMounted(async () => { await portal.load(); await loadSubscription(); });
 
 async function loadSubscription() {
   loading.value = true;
   usageError.value = '';
+  ordersError.value = '';
   try {
-    const [subscriptionResult, usageResult] = await Promise.allSettled([
+    const [subscriptionResult, usageResult, ordersResult] = await Promise.allSettled([
       apiClient.getSubscription(),
       apiClient.getUserUsage(),
+      portal.features.orders ? apiClient.getUserOrders() : Promise.resolve([]),
     ]);
 
     if (subscriptionResult.status === 'fulfilled') {
@@ -55,6 +63,9 @@ async function loadSubscription() {
     } else {
       ElMessage.error(errorText(subscriptionResult.reason, '加载订阅信息失败'));
     }
+
+    if (ordersResult.status === 'fulfilled') orders.value = ordersResult.value;
+    else { orders.value = []; ordersError.value = '订单暂时无法加载'; }
 
     if (usageResult.status === 'fulfilled') {
       usage.value = usageResult.value;
@@ -145,7 +156,9 @@ function errorText(error: unknown, fallback: string) {
 </script>
 
 <template>
-  <PageHeader title="订阅" description="用户中心展示当前套餐、剩余流量和可导入客户端的订阅入口。" />
+  <PageHeader title="我的服务" :description="`${session.user?.name || session.user?.account || '欢迎回来'}，在这里查看套餐、用量及可用节点。`">
+    <el-button :icon="Refresh" :loading="loading" @click="loadSubscription">刷新</el-button>
+  </PageHeader>
 
   <el-skeleton v-if="loading" :rows="8" animated />
   <template v-else-if="subscription">
@@ -153,13 +166,14 @@ function errorText(error: unknown, fallback: string) {
       <el-col :xs="24" :lg="9">
         <el-card shadow="never" class="subscription-card">
           <template #header>
-            <strong>{{ subscription.planName }}</strong>
+            <span>当前套餐</span> · <strong>{{ subscription.planName }}</strong>
           </template>
           <p>到期时间：{{ subscription.expiresAt }}</p>
           <el-divider />
           <span>总流量</span>
           <el-progress :percentage="totalPercent" />
-          <p>{{ totalTraffic.used }} / {{ totalTraffic.total }} GB</p>
+          <p>{{ totalTraffic.total === -1 ? `${totalTraffic.used} GB / 不限流量` : `${totalTraffic.used} / ${totalTraffic.total} GB` }}</p>
+          <p>剩余流量：{{ totalTraffic.total === -1 ? '不限流量' : `${Math.max(0, totalTraffic.total - totalTraffic.used).toFixed(2)} GB` }}</p>
         </el-card>
       </el-col>
 
@@ -177,14 +191,14 @@ function errorText(error: unknown, fallback: string) {
             </el-button>
           </div>
           <p class="muted">
-            客户端访问 `/sub/{token}` 获取 Clash/mihomo YAML。页面仅列出套餐授权下的可用节点。
+            复制订阅链接后，在 Clash 或 mihomo 兼容客户端导入即可使用。
           </p>
         </el-card>
       </el-col>
     </el-row>
 
     <el-card shadow="never" class="section-row">
-      <template #header>可用节点</template>
+      <template #header><span>可用节点</span> <el-tag size="small" effect="plain">{{ subscription.visibleLines.length }} 条</el-tag></template>
       <el-table :data="subscription.visibleLines" stripe>
         <el-table-column label="名称" min-width="160">
           <template #default="{ row }">
@@ -208,12 +222,12 @@ function errorText(error: unknown, fallback: string) {
       <template #header>
         <div class="usage-history-card__header">
           <span>订阅用量统计</span>
-          <el-tag effect="plain">usage_ledgers</el-tag>
+          <el-tag effect="plain">累计用量</el-tag>
         </div>
       </template>
 
       <p class="muted">
-        累计数据来自用户侧 `/api/user/usage`，仅展示当前 API 返回的真实流量和扣费流量汇总。
+        真实流量是实际传输用量；扣费流量按套餐及分组倍率计算。
       </p>
 
       <el-alert
@@ -231,12 +245,18 @@ function errorText(error: unknown, fallback: string) {
         </article>
       </div>
 
-      <el-empty
-        class="usage-empty"
-        description="当前 API 未返回用户侧明细列表"
-      >
-        <p class="muted">页面不构造历史明细占位数据，只展示 `/api/user/usage` 的汇总字段。</p>
-      </el-empty>
+
+    </el-card>
+    <el-card v-if="portal.features.plans || portal.features.orders || portal.features.redeem || portal.features.invites" shadow="never" class="section-row">
+      <template #header>账户服务</template>
+      <el-space wrap>
+        <RouterLink v-if="portal.features.plans" to="/plans"><el-button>选择套餐</el-button></RouterLink>
+        <RouterLink v-if="portal.features.orders" to="/orders"><el-button>我的订单</el-button></RouterLink>
+        <RouterLink v-if="portal.features.redeem" to="/redeem"><el-button>兑换套餐</el-button></RouterLink>
+        <RouterLink v-if="portal.features.invites" to="/invite-codes"><el-button>邀请注册</el-button></RouterLink>
+      </el-space>
+      <p v-if="portal.features.orders && orders[0]" class="muted">最近订单：{{ orders[0].planName || orders[0].orderNo }} · {{ orders[0].status }} · {{ orders[0].createdAt }}</p>
+      <p v-else-if="ordersError" class="muted">{{ ordersError }}</p>
     </el-card>
   </template>
 </template>
@@ -256,9 +276,7 @@ function errorText(error: unknown, fallback: string) {
 
 .usage-history-card {
   overflow: hidden;
-  background:
-    radial-gradient(circle at 92% 0%, rgba(15, 118, 110, 0.2), transparent 18rem),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(237, 246, 239, 0.76));
+  background: var(--surface);
 }
 
 .usage-history-card__header {

@@ -6,7 +6,7 @@
 # 依赖：通过 grep 字面量和正则检查关键能力、禁用项和真实门禁引用。
 # 安全：只检查代码和文档中的固定片段，不读取私有环境变量。
 # 约束：禁止 runtime no-mock 用例出现 page.route 模拟 API。
-# 行为：任一必需文件缺失或覆盖断言失败都会立即退出。
+# 行为：一次列出全部缺失覆盖，最终仍以非零状态阻断，避免逐项重复运行。
 # 失败：用于 CI 阶段阻断主线能力被误删或退化。
 # 维护：新增 v2 主线要求时应添加对应 require_literal 或 require_regex。
 set -euo pipefail
@@ -14,9 +14,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+failures=0
+
 fail() {
   printf 'v2-mainline-coverage: %s\n' "$1" >&2
-  exit 1
+  failures=$((failures + 1))
 }
 
 require_file() {
@@ -207,12 +209,13 @@ require_literal "$EXIT_POOL_HELPER" "setVlessOutboundSecurity" "VLESS security c
 require_literal "$LINE_POOL_PAGE" "VLESS 安全模式" "line pool VLESS security selector"
 require_literal "$LOCAL_EXIT_ROW" "VLESS 安全模式" "local exit VLESS security selector"
 require_literal "$LOCAL_EXIT_ROW" "multiple" "local exit network multi-select"
-require_literal "$LOCAL_EXIT_HELPER" "networkModeOptionsForProtocolSecurity" "protocol/security-aware local exit network filtering"
+require_literal "$LOCAL_EXIT_HELPER" "localExitTransportOptionsFor" "protocol/security-aware local exit transport filtering"
+require_literal "$LOCAL_EXIT_HELPER" "localExitCarriageOptionsFor" "protocol/security-aware local exit carriage filtering"
 require_literal "$LOCAL_EXIT_HELPER" "crypto.randomUUID" "local exit VLESS UUID default generation"
 require_literal "$LOCAL_EXIT_HELPER" "randomCredential" "local exit generated protocol credentials"
 require_literal "$ACCESS_ENTRIES_PAGE" "入口管理" "access entry management page"
 require_literal "$ACCESS_ENTRIES_PAGE" "createAccessEntry(payload)" "access entry creation API"
-require_literal "$ACCESS_ENTRIES_PAGE" "createAccessEntryExitBinding" "access entry exit binding API"
+require_literal "frontend/src/views/access-entries/useEntryExitBinding.ts" "createAccessEntryExitBinding" "access entry exit binding API"
 require_literal "$ACCESS_LINES_PAGE" "expandLocalExitLinePayloads" "local exit multi-select expansion"
 require_literal "$DEPLOY_DOC" "VLESS 线路表单默认使用 Reality" "deployment docs VLESS default Reality"
 require_literal "$DEPLOY_DOC" "网络模式支持多选并按协议与 VLESS security 过滤" "deployment docs multi network mode filtering"
@@ -279,9 +282,9 @@ require_literal "$REAL_GATE" "DISABLE_SYNTHETIC_AGENT_POSTS=1" "real release dis
 require_literal "$REAL_GATE" "REQUIRE_LEDGER_SOURCE_CHECK=true" "real release ledger source check"
 require_literal "$REAL_RELAY_MATRIX" "wait_protocol_route_and_ledger" "real release relay matrix verifies route, ledger, and billing together"
 require_literal "$REAL_RELAY_MATRIX_REDACTION" "assert_relay_subscription_eligibility" "real release relay matrix checks subscription access-line eligibility"
-require_literal "$MAKEFILE" '$(COMPOSE) --env-file "$$real_env_path" up -d --no-build api worker caddy --remove-orphans' "real release gate starts latest built runtime before no-mock"
+require_literal "$MAKEFILE" 'check-real-release: check-real-release-env check-deploy-artifact-endpoint' "real release checks an already deployed runtime"
 require_literal "$MAKEFILE" "bash scripts/check-running-images-current.sh" "real release gate verifies running images after switching to latest build"
-require_literal_order "$MAKEFILE" "check-real-release: check-real-release-env package-docker-artifacts check-deploy-artifact-endpoint" '$(COMPOSE) --env-file "$$real_env_path" up -d --no-build api worker caddy --remove-orphans' "bash scripts/check-real-release.sh" "real release gate switches to latest build before running real checks"
+require_literal "$MAKEFILE" 'python3 scripts/check-release-status.py' "read-only release status is separate from deployment and real UAT"
 require_literal "$MAKEFILE" '$(COMPOSE) build api caddy' "real release artifact packaging builds api and caddy images"
 require_literal_order "$REAL_GATE" 'step "release-env"' "bash scripts/check-running-images-current.sh" 'step "real-smoke"' "real release script refuses stale running runtime before real checks"
 require_literal "$REAL_GATE" 'step "real-e2e-auth-accounts"' "real release script preflights no-mock login accounts"
@@ -290,9 +293,6 @@ require_absent_regex "$OPS_RECOVERY_UAT" "SELECT user_id FROM user_access_line_a
 require_literal "$OPS_RECOVERY_UAT" "line_group_id = :'group_id'::uuid" "ops recovery UAT checks deleted-plan assignment by temporary group"
 require_literal "$OPS_RECOVERY_LARGE_UAT" "action IN ('\${run_marker}', '\${run_marker}.restore')" "ops large recovery audit check uses indexed exact action match"
 require_absent_regex "$OPS_RECOVERY_LARGE_UAT" "action LIKE '\\$\\{run_marker\\}%'" "ops large recovery audit check must not prefix-scan action"
-require_literal "$MAKEFILE" 'XRAYC_REAL_RELEASE_COMPOSE_DATABASE_URL' "real release compose startup can use container-internal database URL"
-require_literal "$MAKEFILE" '@postgres:5432/' "real release compose startup defaults to container-internal postgres host"
-require_literal "$MAKEFILE" 'real_env_path="./$$real_env"' "real release compose startup sources relative env files explicitly"
 require_literal "$REAL_RELEASE_ENV_RULES" "require_production_jwt_runtime_env" "real release env gate validates production JWT runtime env"
 require_literal "$REAL_RELEASE_ENV_EXAMPLE" 'JWT_EXPIRES_IN="30m"' "real release env example includes production access token TTL"
 require_literal "$REAL_RELEASE_ENV_EXAMPLE" 'JWT_REFRESH_EXPIRES_IN="7d"' "real release env example includes production refresh token TTL"
@@ -456,4 +456,15 @@ require_absent_regex "$RATE_LIMIT_SPEC_DOC" "UDP traffic is not a first-version 
 require_literal "$REMOVED_CLIENT_ENDPOINT_TEST" '"/api/client/devices/register"' "removed client API route guard"
 require_literal "$REMOVED_CLIENT_ENDPOINT_TEST" "StatusCode::NOT_FOUND" "removed client API route status"
 
+
+# 发布验证不再隐式启动或替换控制面；实际 UAT 仍可在明确的测试资产上写入。
+real_check_recipe="$(awk '/^check-real-release:/ {copy=1;next} copy && /^[^[:space:]]/ {copy=0} copy {print}' "$MAKEFILE")"
+if printf '%s\n' "$real_check_recipe" | grep -Eq 'compose.*(up|down|restart)|--remove-orphans'; then
+  fail 'real release check must not mutate the deployed control plane'
+fi
+
+if [[ "$failures" -gt 0 ]]; then
+  printf 'v2-mainline-coverage: failed with %s finding(s)\n' "$failures" >&2
+  exit 1
+fi
 printf 'v2-mainline-coverage: passed\n'

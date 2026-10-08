@@ -7,14 +7,17 @@
 import { Refresh, View } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { computed, onMounted, reactive, ref } from 'vue';
+import { defaultPortalFeatures, usePortalFeaturesStore } from '@/stores/portalFeatures';
 import PageHeader from '@/components/PageHeader.vue';
-import { apiClient, type SalesLandingConfig } from '@/services/api';
+import { apiClient, type SalesLandingConfig, type PortalFeatures } from '@/services/api';
 
 type LandingJsonKey = 'navLinks' | 'heroStats' | 'features' | 'planCards' | 'scenarios' | 'faqs' | 'footerLinks';
 
 const loading = ref(true);
 const saving = ref(false);
-const form = reactive<SalesLandingConfig>(emptyLanding());
+const loadError = ref('');
+const portal = usePortalFeaturesStore();
+const form = reactive<SalesLandingConfig & { portalFeatures: PortalFeatures }>(emptyLanding());
 const jsonDraft = reactive<Record<LandingJsonKey, string>>({
   navLinks: '[]',
   heroStats: '[]',
@@ -30,10 +33,11 @@ onMounted(loadLanding);
 
 async function loadLanding() {
   loading.value = true;
+  loadError.value = '';
   try {
     applyLanding(await apiClient.getAdminSalesLanding());
-  } catch {
-    applyLanding(emptyLanding());
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '读取网站设置失败，请刷新后再编辑。';
   } finally {
     loading.value = false;
   }
@@ -48,6 +52,7 @@ async function saveLanding() {
   saving.value = true;
   try {
     applyLanding(await apiClient.updateAdminSalesLanding({ ...form, ...parsed }));
+    portal.apply(form.portalFeatures);
     ElMessage.success('销售首页配置已保存');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存销售首页配置失败');
@@ -103,8 +108,9 @@ function pretty(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
-function emptyLanding(): SalesLandingConfig {
+function emptyLanding(): SalesLandingConfig & { portalFeatures: PortalFeatures } {
   return {
+    portalFeatures: defaultPortalFeatures(),
     eyebrow: 'Global Transit Access',
     title: '稳定高速的全球中转流量套餐',
     subtitle: '面向跨境办公、开发测试和高频出差场景，提供可订阅、可计量、可切换的中转节点服务。',
@@ -161,11 +167,23 @@ function emptyLanding(): SalesLandingConfig {
   <PageHeader title="销售首页配置" description="维护公网销售首页的标题、导航、CTA、卖点、套餐卡片、场景、FAQ 和页脚链接。">
     <el-button :icon="View" @click="$router.push('/')">预览首页</el-button>
     <el-button :icon="Refresh" :loading="loading" @click="loadLanding">刷新</el-button>
-    <el-button type="primary" :loading="saving" @click="saveLanding">保存配置</el-button>
+    <el-button type="primary" :loading="saving" :disabled="loading || Boolean(loadError)" @click="saveLanding">保存配置</el-button>
   </PageHeader>
 
   <el-skeleton v-if="loading" :rows="10" animated />
+  <el-alert v-else-if="loadError" :title="loadError" type="error" :closable="false" />
   <template v-else>
+    <el-card shadow="never" class="section-row" style="margin-bottom: 18px">
+      <template #header>可选营运入口</template>
+      <p class="muted">选择用户中心要显示的功能。收款服务的开关请在支付渠道设置中管理。</p>
+      <el-space wrap :size="24">
+        <el-checkbox v-model="form.portalFeatures.plans">套餐入口</el-checkbox>
+        <el-checkbox v-model="form.portalFeatures.orders">订单入口</el-checkbox>
+        <el-checkbox v-model="form.portalFeatures.redeem">兑换入口</el-checkbox>
+        <el-checkbox v-model="form.portalFeatures.invites">邀请入口</el-checkbox>
+        <el-checkbox v-model="form.portalFeatures.marketing">公开销售首页</el-checkbox>
+      </el-space>
+    </el-card>
     <el-row :gutter="18">
       <el-col :xs="24" :lg="14">
         <el-card shadow="never">

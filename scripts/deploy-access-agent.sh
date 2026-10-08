@@ -9,6 +9,7 @@ DEPLOY_ACCESS_AGENT_LIB_DIR="${SCRIPT_DIR}/lib/deploy-access-agent"
 source "${DEPLOY_ACCESS_AGENT_LIB_DIR}/common.sh"
 source "${DEPLOY_ACCESS_AGENT_LIB_DIR}/tooling.sh"
 source "${DEPLOY_ACCESS_AGENT_LIB_DIR}/deploy.sh"
+source "${DEPLOY_ACCESS_AGENT_LIB_DIR}/preserve.sh"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -21,12 +22,13 @@ DEPLOY_ARTIFACT_TOKEN="${XRAYC_DEPLOY_ARTIFACT_TOKEN:-${DEPLOY_ARTIFACT_TOKEN:-}
 DEPLOY_TASK_ID="${XRAYC_DEPLOY_TASK_ID:-}"
 DEPLOY_TASK_REPORT_TOKEN="${XRAYC_DEPLOY_TASK_REPORT_TOKEN:-}"
 INSTALL_DIR="${XRAYC_INSTALL_DIR:-/opt/xrayc/access-agent}"
+INSTALL_DIR="${INSTALL_DIR%/}"
 ARTIFACT_DIR="${INSTALL_DIR}/artifacts"
 COMPOSE_PROJECT_NAME="${XRAYC_COMPOSE_PROJECT_NAME:-xrayc-access}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-120}"
 DEPLOY_START="${XRAYC_DEPLOY_START:-true}"
 DISABLE_LEGACY_SYSTEMD_UNITS="${XRAYC_DISABLE_LEGACY_SYSTEMD_UNITS:-false}"
-CLEAN_LEGACY_COMPOSE_PROJECTS="${XRAYC_CLEAN_LEGACY_COMPOSE_PROJECTS:-true}"
+CLEAN_LEGACY_COMPOSE_PROJECTS="${XRAYC_CLEAN_LEGACY_COMPOSE_PROJECTS:-false}"
 REUSE_EXISTING_IMAGES="${XRAYC_DEPLOY_REUSE_EXISTING_IMAGES:-false}"
 OVERWRITE_RUNTIME_CONFIG="${XRAYC_DEPLOY_OVERWRITE_RUNTIME_CONFIG:-${XRAYC_DEPLOY_OVERWRITE_XRAY_CONFIG:-false}}"
 
@@ -41,6 +43,8 @@ report_deploy_progress() {
   local status="$1"
   local step="$2"
   local progress="$3"
+  DEPLOY_CURRENT_STEP="$step"
+  [[ "${DEPLOY_CENTER_VERIFIED:-0}" == "1" ]] || return 0
   if [[ -z "$DEPLOY_TASK_ID" || -z "$DEPLOY_TASK_REPORT_TOKEN" ]]; then
     return 0
   fi
@@ -58,7 +62,7 @@ report_deploy_progress() {
 finish_deploy_trap() {
   local status="$?"
   if [[ "$status" -ne 0 ]]; then
-    report_deploy_progress failed failed 100
+    report_deploy_progress failed "${DEPLOY_CURRENT_STEP:-preflight}" 100
   fi
   cleanup_all "$status"
   exit "$status"
@@ -79,10 +83,10 @@ CF_CERT_MODE="${XRAYC_CF_CERT_MODE:-reuse_direct}"
 CF_DOMAIN="${XRAYC_CF_DOMAIN:-}"
 CLOUDFLARE_API_TOKEN="${XRAYC_CLOUDFLARE_API_TOKEN:-}"
 DEPLOY_READY_TIMEOUT="${XRAYC_DEPLOY_READY_TIMEOUT_SECONDS:-300}"
-RUST_LOG_VALUE="${RUST_LOG:-info,xrayc_access_agent=debug}"
+RUST_LOG_VALUE="${RUST_LOG:-info}"
 XRAY_RELOAD_COMMAND="${XRAYC_XRAY_RELOAD_COMMAND:-}"
 DEPLOY_ROLLBACK_ON_FAILURE="${XRAYC_DEPLOY_ROLLBACK_ON_FAILURE:-true}"
-DEPLOY_ROLLBACK_REMOVE_EXISTING="${XRAYC_DEPLOY_ROLLBACK_REMOVE_EXISTING:-$OVERWRITE_RUNTIME_CONFIG}"
+DEPLOY_ROLLBACK_REMOVE_EXISTING="${XRAYC_DEPLOY_ROLLBACK_REMOVE_EXISTING:-false}"
 RATE_LIMITER_ENABLED="${XRAYC_RATE_LIMITER_ENABLED:-true}"
 RATE_LIMITER_DRY_RUN="${XRAYC_RATE_LIMITER_DRY_RUN:-false}"
 RATE_LIMITER_INTERFACE="${XRAYC_RATE_LIMITER_INTERFACE:-}"
@@ -98,6 +102,7 @@ XRAY_HOST_BINARY_PATH="${INSTALL_DIR}/bin/xrayc-xray"
 XRAY_CONFIG_CONTAINER_PATH="${XRAY_CONFIG_CONTAINER_DIR}/config.json"
 XRAY_ACCESS_LOG_CONTAINER_PATH="${XRAY_LOG_CONTAINER_DIR}/access.log"
 
+validate_install_ownership
 ensure_node_credentials
 EXISTING_TLS_CERT_DOMAINS=""
 if [[ -f "${INSTALL_DIR}/access-agent.env" ]]; then
@@ -116,10 +121,14 @@ fi
 
 tmp_dir="$(mktemp -d)"
 DEPLOY_CREATED_INSTALL_DIR=0
+DEPLOY_RUNTIME_MUTATION_STARTED=0
+DEPLOY_CURRENT_STEP=preflight
 DEPLOY_COMPOSE_UP_ATTEMPTED=0
 DEPLOY_CONTAINER_NAMES_TOUCHED=0
 
 trap finish_deploy_trap EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 report_deploy_progress running server_started 10
 
 CURL_CONFIG="${tmp_dir}/curl.conf"
@@ -127,28 +136,23 @@ umask 077
 printf 'header = "Authorization: Bearer %s"\n' "$(curl_config_escape "$DEPLOY_ARTIFACT_TOKEN")" > "$CURL_CONFIG"
 umask 022
 
+# 先在临时目录验证中心地址、鉴权与全部制品，不触碰既有安装目录或容器。
+case "$CONTROL_PLANE_URL" in http://*|https://*) ;; *) die "center URL must use http or https" ;; esac
+case "$DEPLOY_BASE_URL" in http://*|https://*) ;; *) die "artifact URL must use http or https" ;; esac
+case "$(uname -s)" in Linux) ;; *) die "access-agent installer requires Linux" ;; esac
+case "$(uname -m)" in x86_64|amd64|aarch64|arm64) ;; *) die "unsupported agent platform" ;; esac
 ensure_tooling
-cleanup_existing_compose_project_for_force_reinstall
-cleanup_existing_install_files_for_force_reinstall
-cleanup_legacy_compose_projects
-cleanup_tls_certificates_for_force_reinstall
-install_tls_certificates
-
-log "preparing install directories"
-run_root install -d -m 0755 \
-  "$INSTALL_DIR" \
-  "$ARTIFACT_DIR" \
-  "${INSTALL_DIR}/bin" \
-  "$XRAY_HOST_CONFIG_DIR" \
-  "${INSTALL_DIR}/certs"
-if [[ "$INSTALL_DIR_PREEXISTING" -eq 0 ]]; then
-  DEPLOY_CREATED_INSTALL_DIR=1
+ARTIFACT_DIR="${tmp_dir}/artifacts"
+run_root install -d -m 0700 "$ARTIFACT_DIR"
+report_deploy_progress running preflight 20
+if ! run_root curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+  "${CONTROL_PLANE_URL}/health" >"${tmp_dir}/center-health.json" 2>"${tmp_dir}/center-health.err"; then
+  die "center health preflight failed; existing services unchanged"
 fi
-run_root install -d -m 0755 "$XRAY_HOST_LOG_DIR"
-run_root install -d -m 0700 "${INSTALL_DIR}/state"
-run_root touch "${XRAY_HOST_LOG_DIR}/access.log"
-run_root chmod 0644 "${XRAY_HOST_LOG_DIR}/access.log"
-
+[[ "$(json_value service "${tmp_dir}/center-health.json")" == "xrayc-api" ]] || die "center health response is not XrayC; existing services unchanged"
+DEPLOY_CENTER_VERIFIED=1
+report_deploy_progress running preflight 20
+report_deploy_progress running artifacts_download 25
 download_artifact access-agent-manifest.json
 
 ACCESS_AGENT_IMAGE="$(json_value access_agent_image "${ARTIFACT_DIR}/access-agent-manifest.json")"
@@ -212,6 +216,41 @@ fi
 
 xray_bin="${tmp_dir}/xrayc-xray"
 extract_binary "$XRAY_IMAGE" "$xray_bin" /usr/local/bin/xray /usr/bin/xray /xray /app/xray
+if ! run_root "$xray_bin" version > "${tmp_dir}/xray-version.txt" 2> "${tmp_dir}/xray-version.err"; then
+  die "Xray binary is incompatible with this server; existing services unchanged"
+fi
+XRAY_VERSION="$(head -n 1 "${tmp_dir}/xray-version.txt")"
+
+container_suffix="$(printf '%s' "$XRAYC_NODE_ID" | sha256sum | cut -c1-12)"
+[[ -n "$container_suffix" ]] || container_suffix="default"
+xray_container="xrayc-xray-${container_suffix}"
+agent_container="xrayc-access-agent-${container_suffix}"
+
+DEPLOY_RUNTIME_MUTATION_STARTED=1
+staged_artifact_dir="$ARTIFACT_DIR"
+ARTIFACT_DIR="${INSTALL_DIR}/artifacts"
+report_deploy_progress running runtime_prepare 55
+preserve_existing_installation
+cleanup_tls_certificates_for_force_reinstall
+install_tls_certificates
+
+log "preparing install directories"
+run_root install -d -m 0755 \
+  "$INSTALL_DIR" \
+  "$ARTIFACT_DIR" \
+  "${INSTALL_DIR}/bin" \
+  "$XRAY_HOST_CONFIG_DIR" \
+  "${INSTALL_DIR}/certs"
+if [[ "$INSTALL_DIR_PREEXISTING" -eq 0 ]]; then
+  DEPLOY_CREATED_INSTALL_DIR=1
+fi
+run_root install -d -m 0755 "$XRAY_HOST_LOG_DIR"
+run_root install -d -m 0700 "${INSTALL_DIR}/state"
+if ! run_root test -e "${XRAY_HOST_LOG_DIR}/access.log"; then
+  run_root install -m 0644 /dev/null "${XRAY_HOST_LOG_DIR}/access.log"
+fi
+
+run_root cp -a "${staged_artifact_dir}/." "$ARTIFACT_DIR/"
 
 log "installing runtime config test binaries"
 write_file_root 0755 root root "$xray_bin" "$XRAY_HOST_BINARY_PATH"
@@ -232,22 +271,15 @@ cat > "$initial_xray_config" <<'JSON'
 }
 JSON
 
-if [[ ! -f "${XRAY_HOST_CONFIG_DIR}/config.json" || "$OVERWRITE_RUNTIME_CONFIG" == "true" ]]; then
+if [[ ! -f "${XRAY_HOST_CONFIG_DIR}/config.json" ]]; then
   log "installing initial Xray config"
   write_file_root 0644 root root "$initial_xray_config" "${XRAY_HOST_CONFIG_DIR}/config.json"
 else
   log "keeping existing Xray config"
 fi
 
-if [[ "$OVERWRITE_RUNTIME_CONFIG" == "true" ]]; then
-  log "clearing stale access-agent state for forced reinstall"
-  run_root rm -f "${INSTALL_DIR}/state/state.json" "${INSTALL_DIR}/state/traffic-backlog.json"
-fi
 
-container_suffix="$(printf '%s' "$XRAYC_NODE_ID" | sha256sum | cut -c1-12)"
-[[ -n "$container_suffix" ]] || container_suffix="default"
-xray_container="xrayc-xray-${container_suffix}"
-agent_container="xrayc-access-agent-${container_suffix}"
+
 
 if [[ -z "$XRAY_RELOAD_COMMAND" ]]; then
   XRAY_RELOAD_COMMAND="curl --fail --silent --show-error --unix-socket /var/run/docker.sock -X POST 'http://localhost/containers/${xray_container}/restart?t=0' >/dev/null"
@@ -255,7 +287,7 @@ fi
 # Xray 旧实例回收命令：reload/redeploy 切换 Xray 时，旧容器可能已被删但进程未退，
 # 通过 SO_REUSEPORT 继续占用 Stats API 端口（如 10085），导致 agent statsquery
 # 被内核分流到旧进程读不到当前用户流量 → 计费失效。回收脚本通过 docker socket
-# 枚举所有 xrayc-xray-* 容器，删除非当前实例（含其残留进程），确保同一 Stats 端口
+# 只枚举本次 Compose 实例，停止非当前 Xray，保留容器日志，确保同一 Stats 端口
 # 只有当前 Xray 在监听。回收命令为独立脚本文件，避免 env 转义破坏内联 shell。
 RECLAIM_SCRIPT_CONTAINER_PATH="/var/lib/xrayc/access-agent/reclaim-xray.sh"
 XRAY_RECLAIM_COMMAND="${XRAYC_XRAY_RECLAIM_COMMAND:-sh ${RECLAIM_SCRIPT_CONTAINER_PATH}}"
@@ -315,6 +347,8 @@ env_file="${tmp_dir}/access-agent.env"
   # 监控中心宿主磁盘采集挂载点(阶段B):与 compose 里 `- /:/hostfs:ro` 对齐,
   # agent 对 /hostfs 跑 statvfs 读宿主磁盘用量;挂载缺失时 agent 自身回退 "/"。
   write_env_line XRAYC_HOST_FS_ROOT "/hostfs"
+  write_env_line XRAYC_XRAY_VERSION "$XRAY_VERSION"
+  write_env_line XRAYC_COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
   write_env_line RUST_LOG "$RUST_LOG_VALUE"
 } > "$env_file"
 log "installing access-agent environment file"
@@ -322,7 +356,7 @@ write_file_root 0600 root root "$env_file" "${INSTALL_DIR}/access-agent.env"
 
 # 写入 Xray 旧实例回收脚本到状态目录（已挂载进 agent 容器为
 # /var/lib/xrayc/access-agent/reclaim-xray.sh）。脚本只在 reload 成功后由 agent 执行。
-# 通过 docker socket 枚举所有 xrayc-xray-* 容器，删除非当前实例及其残留进程，
+# 通过 docker socket 按本次 Compose 实例标签筛选，停止该实例旧进程，
 # 保证同一 Stats API 端口只剩当前 Xray 监听，避免 statsquery 读到旧进程导致计费失效。
 reclaim_script="${tmp_dir}/reclaim-xray.sh"
 cat > "$reclaim_script" <<RECLAIM
@@ -332,17 +366,16 @@ cat > "$reclaim_script" <<RECLAIM
 set -u
 sock=/var/run/docker.sock
 current="${xray_container}"
-list="\$(curl --fail --silent --show-error --unix-socket "\$sock" 'http://localhost/containers/json?all=1' 2>/dev/null)" || exit 0
+list="\$(curl --fail --silent --show-error --unix-socket "\$sock" --get --data-urlencode 'filters={"label":["com.docker.compose.project=${COMPOSE_PROJECT_NAME}"]}' 'http://localhost/containers/json?all=1' 2>/dev/null)" || exit 0
 # 提取所有 xrayc-xray-* 容器名（Names 形如 ["/xrayc-xray-<suffix>"]），排除 agent。
 names="\$(printf '%s' "\$list" | grep -oE '"/xrayc-xray-[A-Za-z0-9_.-]+"' | tr -d '"/' | sort -u)"
 status=0
 for name in \$names; do
   [ "\$name" = "\$current" ] && continue
-  # 先停后强删旧容器；强删会向其主进程发 SIGKILL，连同残留进程一起回收。
+  # 停止本实例旧容器，其他安装实例与保留的历史容器不在本次筛选范围。
   curl --fail --silent --show-error --unix-socket "\$sock" -X POST "http://localhost/containers/\$name/stop?t=5" >/dev/null 2>&1 || true
-  if ! curl --fail --silent --show-error --unix-socket "\$sock" -X DELETE "http://localhost/containers/\$name?force=true" >/dev/null 2>&1; then
-    status=1
-  fi
+  # 只停止同实例旧进程，日志随原容器保留。
+
 done
 exit \$status
 RECLAIM
@@ -350,6 +383,7 @@ write_file_root 0755 root root "$reclaim_script" "${INSTALL_DIR}/state/reclaim-x
 
 compose_file="${tmp_dir}/docker-compose.yml"
 cat > "$compose_file" <<YAML
+name: '$(yaml_escape "$COMPOSE_PROJECT_NAME")'
 services:
   xray:
     image: '$(yaml_escape "$XRAY_IMAGE")'
@@ -413,15 +447,9 @@ fi
 
 if [[ "$DEPLOY_START" == "true" ]]; then
   log "starting xrayc Docker Compose services"
-  if [[ "$OVERWRITE_RUNTIME_CONFIG" == "true" ]]; then
-    log "stopping existing project containers before forced reinstall"
-    DEPLOY_COMPOSE_UP_ATTEMPTED=1
-    compose_run -f "${INSTALL_DIR}/docker-compose.yml" -p "$COMPOSE_PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
-  fi
   DEPLOY_CONTAINER_NAMES_TOUCHED=1
-  docker_run rm -f "$agent_container" "$xray_container" >/dev/null 2>&1 || true
   DEPLOY_COMPOSE_UP_ATTEMPTED=1
-  if ! compose_run -f "${INSTALL_DIR}/docker-compose.yml" -p "$COMPOSE_PROJECT_NAME" up -d --remove-orphans >/dev/null 2> "${tmp_dir}/compose-up.err"; then
+  if ! compose_run -f "${INSTALL_DIR}/docker-compose.yml" -p "$COMPOSE_PROJECT_NAME" up -d >/dev/null 2> "${tmp_dir}/compose-up.err"; then
     log_redacted_tail "${tmp_dir}/compose-up.err"
     die "Docker Compose service start failed; stderr redacted"
   fi

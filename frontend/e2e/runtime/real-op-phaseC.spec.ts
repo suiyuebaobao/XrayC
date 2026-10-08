@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 /*
  * 用途：并行流 C 控制面全流程真实操作 E2E（真实 UI 点击 + 真实后端 no-mock + 真实 SSH 一键安装）。
  * 覆盖 Phase A(VLESS)之外的协议：域名直连(灰云)下 ① Trojan ② HY2(hysteria/udp) ③ Shadowsocks(2022)。
@@ -246,7 +247,7 @@ test.describe('Phase C 控制面全流程真实操作（Trojan/HY2/SS 域名直�
       expect(r.online, '已存在节点应健康').toBe(true);
       return;
     }
-    await page.getByRole('button', { name: '一键安装 Agent' }).click();
+    await openNodeOnboarding(page, 'automatic');
     const dialog = page.getByRole('dialog', { name: '一键安装 Agent' });
     await expect(dialog).toBeVisible();
     await formItemByLabel(page, '节点名称').locator('input').fill(NODE_NAME);

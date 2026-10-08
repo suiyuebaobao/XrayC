@@ -219,6 +219,7 @@ export type AccessNodeSummary = {
 
 // 监控中心·节点业务流量汇总：某区间内该节点上/下/总字节，面板每行「今日」量与详情汇总复用。
 export type NodeTrafficSummary = {
+  partialArchivedHours?: number;
   accessNodeId: string;
   accessNodeName: string;
   uplinkBytes: number;
@@ -236,6 +237,7 @@ export type NodeTrafficTrendPoint = {
 
 // 监控中心·节点流量趋势响应：按桶排列的趋势点 + 整区间汇总数字。
 export type NodeTrafficTrend = {
+  partialArchivedHours?: number;
   points: NodeTrafficTrendPoint[];
   summary: {
     uplinkBytes: number;

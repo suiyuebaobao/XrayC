@@ -132,7 +132,7 @@ fn user_subscription_json_for_token(
         "expires_at": user_subscription.expires_at,
         "traffic": {
             "used_gb": bytes_to_gb(user_subscription.used_bytes),
-            "total_gb": bytes_to_gb(user_subscription.limit_bytes)
+            "total_gb": if user_subscription.limit_bytes == u64::MAX { -1.0 } else { bytes_to_gb(user_subscription.limit_bytes) }
         },
         "token": token.token,
         "subscription_url": format!("/sub/{}", token.token),

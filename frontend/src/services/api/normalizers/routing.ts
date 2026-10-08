@@ -312,6 +312,7 @@ function normalizeNodeRuntimeMetrics(value: unknown): NodeRuntimeMetrics | null 
 export function normalizeNodeTrafficSummary(value: unknown): NodeTrafficSummary {
   const data = recordValue(value);
   return {
+    partialArchivedHours: numberValue(data.partialArchivedHours ?? data.partial_archived_hours),
     accessNodeId: stringValue(data.accessNodeId ?? data.access_node_id),
     accessNodeName: stringValue(data.accessNodeName ?? data.access_node_name),
     uplinkBytes: numberValue(data.uplinkBytes ?? data.uplink_bytes),
@@ -336,6 +337,7 @@ export function normalizeNodeTrafficTrend(value: unknown): NodeTrafficTrend {
   const data = recordValue(value);
   const summary = recordValue(data.summary);
   return {
+    partialArchivedHours: numberValue(data.partialArchivedHours ?? data.partial_archived_hours),
     points: arrayValue(data.points ?? data.items).map(normalizeNodeTrafficTrendPoint),
     summary: {
       uplinkBytes: numberValue(summary.uplinkBytes ?? summary.uplink_bytes),

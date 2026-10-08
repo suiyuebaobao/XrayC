@@ -2,7 +2,7 @@
 // 它从管理接口读取真实中转节点、线路、分组和运行 summary。
 // 这里不生成模拟数据，所有健康结论都基于心跳、探针和运行指标。
 // 页面组件只消费这里输出的小卡片模型，避免单个 Vue 文件过长。
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   apiClient,
   type AccessLine,
@@ -34,7 +34,7 @@ export type LineCard = {
 
 const refreshIntervalMs = 15_000;
 
-export function useHealthCheck() {
+export function useHealthCheck(options: { active?: () => boolean } = {}) {
   const loading = ref(true);
   const errorMessage = ref('');
   const refreshedAt = ref('');
@@ -120,9 +120,13 @@ export function useHealthCheck() {
   ]);
 
   onMounted(() => {
-    void load();
-    refreshTimer = window.setInterval(() => void load(false), refreshIntervalMs);
+    if (options.active?.() !== false) void load();
+    refreshTimer = window.setInterval(() => {
+      if (options.active?.() !== false && document.visibilityState !== 'hidden') void load(false);
+    }, refreshIntervalMs);
   });
+
+  if (options.active) watch(options.active, (active) => { if (active) void load(); });
 
   onBeforeUnmount(() => {
     if (refreshTimer) {

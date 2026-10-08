@@ -202,7 +202,7 @@ function failureSuggestions(task: DeploymentTask) {
   if (step.includes('node_register')) {
     return ['检查节点鉴权码是否有效', '确认中转节点地址和端口没有冲突'];
   }
-  return ['点击重试安装，平台会先卸载旧容器和旧运行状态，再重新安装'];
+  return ['先查看详细错误，修复原因后再重试；安装文件预检通过前保留现有服务'];
 }
 
 function resultRows(task: DeploymentTask) {
@@ -342,7 +342,7 @@ function retryInstall(task: DeploymentTask) {
           type="error"
           show-icon
           :closable="false"
-          title="该任务长时间没有更新，建议重新安装。"
+          title="该任务长时间没有更新，请先检查节点状态及错误详情，再决定是否重试。"
         />
 
         <section v-for="task in selectedRow.tasks" :key="task.id" class="task-history">
@@ -393,6 +393,10 @@ function retryInstall(task: DeploymentTask) {
             <div class="task-detail__title">失败原因</div>
             <p><strong>失败步骤：</strong>{{ failedStepTitle(task) }}</p>
             <p><strong>错误摘要：</strong>{{ task.errorSummary || '后端未返回错误摘要' }}</p>
+            <details v-if="typeof task.result.error === 'string' && task.result.error" class="task-error-details">
+              <summary>查看详细错误</summary>
+              <pre>{{ task.result.error }}</pre>
+            </details>
             <ul>
               <li v-for="item in failureSuggestions(task)" :key="item">{{ item }}</li>
             </ul>
@@ -413,109 +417,4 @@ function retryInstall(task: DeploymentTask) {
   </el-dialog>
 </template>
 
-<style scoped>
-.deployment-tasks-card {
-  margin-bottom: 18px;
-}
-
-.deployment-tasks-card__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.deployment-tasks-card__header span,
-.task-meta {
-  color: var(--ink-soft);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.deployment-tasks-table {
-  width: 100%;
-}
-
-.address-button {
-  font-weight: 700;
-  padding: 0;
-}
-
-.progress-cell {
-  max-width: 260px;
-}
-
-.task-detail {
-  display: grid;
-  gap: 16px;
-}
-
-.detail-head,
-.task-history__head,
-.task-step__head {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-.detail-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.task-history {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  display: grid;
-  gap: 14px;
-  padding: 14px;
-}
-
-.task-detail__section {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  padding: 14px;
-}
-
-.task-detail__title {
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-
-.task-step__head {
-  max-width: 720px;
-}
-
-.task-failure {
-  border-color: var(--el-color-danger-light-7);
-  background: var(--el-color-danger-light-9);
-}
-
-.task-failure p {
-  margin: 6px 0;
-}
-
-.task-failure ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
-}
-
-.result-list {
-  display: grid;
-  gap: 8px 14px;
-  grid-template-columns: 120px minmax(0, 1fr);
-  margin: 0;
-}
-
-.result-list dt {
-  color: var(--ink-soft);
-}
-
-.result-list dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-</style>
+<style scoped src="../../styles/deployment-tasks.css"></style>

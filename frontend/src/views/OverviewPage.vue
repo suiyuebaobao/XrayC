@@ -1,134 +1,153 @@
-<!--
-  本页面用于后台总览关键运营指标。
-  它展示活跃用户、线路、可用线路和配置同步概况。
-  页面只读取 summary API，不直接修改任何运行配置。
--->
+<!-- 总览读取真实 summary 与节点状态，只展示日常决策所需信息，明细通过工作区下钻。 -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import PageHeader from '@/components/PageHeader.vue';
-import { apiClient, type OverviewSummary } from '@/services/api';
-
+import { ArrowRight, Connection, Monitor, Plus, Refresh, SetUp, User } from "@element-plus/icons-vue";
+import { computed, onMounted, ref } from "vue";
+import PageHeader from "@/components/PageHeader.vue";
+import { apiClient, type OverviewSummary, type AccessNodeSummary } from "@/services/api";
 const loading = ref(true);
+const error = ref("");
 const summary = ref<OverviewSummary>();
-const configSyncPercentage = computed(() => {
-  const total = summary.value?.accessNodeCount ?? 0;
-  if (total <= 0) {
-    return 0;
+const nodes = ref<AccessNodeSummary[]>([]);
+const refreshedAt = ref("");
+const synced = computed(() => nodes.value.filter((node) => node.configSynced && !node.configDirty).length);
+const syncPercent = computed(() => (nodes.value.length ? Math.round((synced.value / nodes.value.length) * 100) : 0));
+const metrics = computed(() => [
+  { label: "活跃用户", value: summary.value?.activeUsers, icon: User, hint: "当前有效服务账号" },
+  { label: "启用线路", value: summary.value?.activeAccessLines, icon: Connection, hint: "用户可授权的绑定线路" },
+  { label: "接入节点", value: nodes.value.length, icon: SetUp, hint: "独立管理的服务器" },
+  { label: "待同步节点", value: summary.value?.configDirtyNodes, icon: Monitor, hint: "等待应用最新配置" },
+]);
+onMounted(load);
+async function load() {
+  loading.value = true;
+  error.value = "";
+  try {
+    const [overview, control] = await Promise.all([apiClient.getOverview(), apiClient.getControlPlane()]);
+    summary.value = overview;
+    nodes.value = control.accessNodes;
+    refreshedAt.value = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "总览读取失败";
+  } finally {
+    loading.value = false;
   }
-  const dirty = Math.min(summary.value?.configDirtyNodes ?? 0, total);
-  return Math.round(((total - dirty) / total) * 100);
-});
-
-onMounted(async () => {
-  summary.value = await apiClient.getOverview();
-  loading.value = false;
-});
+}
+function nodeState(node: AccessNodeSummary) {
+  if (node.status === "offline" || node.healthStatus === "offline") return { label: "离线", type: "danger" as const };
+  if (node.configDirty || !node.configSynced) return { label: "待同步", type: "warning" as const };
+  return { label: "已同步", type: "success" as const };
+}
 </script>
-
 <template>
-  <PageHeader title="概览" description="先维护出口管理，再通过入口管理创建入口出口绑定节点，分组用于套餐授权和归类。" />
-
-  <el-skeleton v-if="loading" :rows="8" animated />
+  <PageHeader title="总览" description="查看服务状态，处理当前需要关注的工作。"
+    ><span v-if="refreshedAt" class="overview-updated">更新于 {{ refreshedAt }}</span
+    ><el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button></PageHeader
+  >
+  <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+  <el-skeleton v-if="loading && !summary" :rows="8" animated />
   <template v-else-if="summary">
-    <div class="metric-grid">
-      <el-card shadow="never" class="metric-card">
-        <span>活跃用户</span>
-        <strong>{{ summary.activeUsers }}</strong>
-      </el-card>
-      <el-card shadow="never" class="metric-card">
-        <span>启用线路</span>
-        <strong>{{ summary.activeAccessLines }}</strong>
-      </el-card>
-      <el-card shadow="never" class="metric-card">
-        <span>可用线路</span>
-        <strong>{{ summary.healthyExitPools }}</strong>
-      </el-card>
+    <div class="overview-metrics">
+      <article v-for="metric in metrics" :key="metric.label">
+        <header>
+          <span>{{ metric.label }}</span
+          ><el-icon><component :is="metric.icon" /></el-icon>
+        </header>
+        <strong>{{ metric.value ?? "—" }}</strong>
+        <p>{{ metric.hint }}</p>
+      </article>
     </div>
-
-    <el-card shadow="never" class="section-row">
-      <template #header>核心配置路径</template>
-      <div class="core-flow">
-        <RouterLink to="/admin/line-pool">
-          <strong>出口管理</strong>
-          <span>先维护线路地址、端口和协议凭据。</span>
-        </RouterLink>
-        <RouterLink to="/admin/line-groups">
-          <strong>分组</strong>
-          <span>从入口出口绑定节点中选择成员，按 AI、游戏、GPT、视频等用途归类。</span>
-        </RouterLink>
-        <RouterLink to="/admin/transit-nodes">
-          <strong>中转节点</strong>
-          <span>部署中转节点、查看运行状态，并批量添加本机出口服务。</span>
-        </RouterLink>
-        <RouterLink to="/admin/access-entries">
-          <strong>入口管理</strong>
-          <span>创建用户入口，并绑定一条或多条出口线路形成订阅节点。</span>
-        </RouterLink>
-        <RouterLink to="/admin/plans">
-          <strong>套餐授权</strong>
-          <span>按套餐授权用户可访问的分组。</span>
-        </RouterLink>
-      </div>
-    </el-card>
-
-    <el-row :gutter="18" class="section-row">
-      <el-col :xs="24" :lg="16">
-        <el-card shadow="never">
-          <template #header>中转节点运行态</template>
-          <div class="status-panel">
-            <div>
-              <span>待同步节点</span>
-              <strong>{{ summary.configDirtyNodes }}</strong>
-              <p>配置变化后等待节点运行组件拉取并应用。</p>
-            </div>
-            <el-progress :percentage="configSyncPercentage" :stroke-width="14" striped />
+    <div class="overview-grid">
+      <section class="overview-panel">
+        <header>
+          <div>
+            <h2>节点与配置</h2>
+            <p>运行信息来自 Agent 上报</p>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :lg="8">
-        <el-card shadow="never">
-          <template #header>近期事件</template>
-          <el-timeline>
-            <el-timeline-item
-              v-for="event in summary.recentEvents"
-              :key="event.id"
-              :type="event.level === 'danger' ? 'danger' : event.level"
-              :timestamp="event.time"
+          <RouterLink to="/admin/transit-nodes"
+            >全部节点<el-icon><ArrowRight /></el-icon
+          ></RouterLink>
+        </header>
+        <div class="overview-sync">
+          <div>
+            <span>配置同步</span
+            ><strong
+              >{{ synced }} <small>/ {{ nodes.length }}</small></strong
             >
-              {{ event.title }}
-            </el-timeline-item>
-          </el-timeline>
-        </el-card>
-      </el-col>
-    </el-row>
+          </div>
+          <el-progress :percentage="syncPercent" :show-text="false" :stroke-width="5" color="#8d88dc" />
+        </div>
+        <div v-if="nodes.length" class="overview-node-list">
+          <RouterLink v-for="node in nodes.slice(0, 5)" :key="node.id" to="/admin/transit-nodes"
+            ><span class="overview-node-icon"
+              ><el-icon><SetUp /></el-icon
+            ></span>
+            <div>
+              <strong>{{ node.name }}</strong
+              ><small>{{ node.agentVersion || "Agent 版本未上报" }}</small>
+            </div>
+            <el-tag :type="nodeState(node).type" effect="light">{{ nodeState(node).label }}</el-tag></RouterLink
+          >
+        </div>
+        <el-empty v-else description="尚未接入节点" :image-size="65" />
+      </section>
+      <section class="overview-panel overview-actions">
+        <header>
+          <div>
+            <h2>日常工作</h2>
+            <p>从这里继续管理你的服务</p>
+          </div>
+        </header>
+        <RouterLink to="/admin/lines"
+          ><span class="overview-action-icon"
+            ><el-icon><Connection /></el-icon
+          ></span>
+          <div>
+            <strong>管理订阅线路</strong>
+            <p>入口、出口与分组，一处查看</p>
+          </div>
+          <el-icon><ArrowRight /></el-icon></RouterLink
+        ><RouterLink to="/admin/users"
+          ><span class="overview-action-icon"
+            ><el-icon><User /></el-icon
+          ></span>
+          <div>
+            <strong>用户与服务</strong>
+            <p>查看套餐、订阅及使用情况</p>
+          </div>
+          <el-icon><ArrowRight /></el-icon></RouterLink
+        ><RouterLink to="/admin/access-operations"
+          ><span class="overview-action-icon"
+            ><el-icon><Monitor /></el-icon
+          ></span>
+          <div>
+            <strong>监控与排查</strong>
+            <p>从异常状态进入详细记录</p>
+          </div>
+          <el-icon><ArrowRight /></el-icon
+        ></RouterLink>
+        <div class="overview-action-bottom">
+          <el-icon><Plus /></el-icon><RouterLink to="/admin/transit-nodes">需要扩展容量？接入新的服务器</RouterLink>
+        </div>
+      </section>
+    </div>
+    <section class="overview-panel overview-events">
+      <header>
+        <div>
+          <h2>近期事件</h2>
+          <p>优先关注需要处理的变化</p>
+        </div>
+        <RouterLink to="/admin/audit-logs"
+          >查看审计<el-icon><ArrowRight /></el-icon
+        ></RouterLink>
+      </header>
+      <div v-if="summary.recentEvents.length" class="overview-event-list">
+        <div v-for="event in summary.recentEvents.slice(0, 5)" :key="event.id">
+          <span class="overview-event-dot" :class="event.level" /><strong>{{ event.title }}</strong
+          ><time>{{ event.time }}</time>
+        </div>
+      </div>
+      <el-empty v-else description="目前没有近期事件" :image-size="56" />
+    </section>
   </template>
 </template>
-
-<style scoped>
-.core-flow {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.core-flow a {
-  display: grid;
-  gap: 8px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  color: var(--accent-dark);
-  background: rgba(255, 255, 255, 0.7);
-}
-
-.core-flow span {
-  color: var(--ink-soft);
-  line-height: 1.6;
-}
-
-@media (max-width: 900px) {
-  .core-flow {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
+<style scoped src="../styles/overview.css"></style>

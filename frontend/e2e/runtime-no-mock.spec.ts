@@ -1,3 +1,4 @@
+import { expectAdminWorkspaces } from './helpers/node-onboarding';
 /*
  * 用途：验证 no-mock 运行时页面直接使用真实后端数据。
  * 测试流程保留在本文件，通用工具拆到 e2e/runtime 目录。
@@ -77,7 +78,7 @@ test('普通用户 no-mock 运行时页面使用真实后端数据', async ({ pa
 
   const dashboardSubscriptionResponse = await gotoAndWaitForApi(page, '/dashboard', API.userSubscription);
   const dashboardSubscription = normalizeSubscription(await responseData(dashboardSubscriptionResponse));
-  await expect(page.getByRole('heading', { name: '首页' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '我的服务' })).toBeVisible();
   await expect(page.getByText('当前套餐')).toBeVisible();
   await expect(page.getByText('剩余流量')).toBeVisible();
   await expect(page.getByText('可用节点', { exact: true })).toBeVisible();
@@ -85,7 +86,7 @@ test('普通用户 no-mock 运行时页面使用真实后端数据', async ({ pa
 
   const subscriptionResponse = await gotoAndWaitForApi(page, '/subscription', API.userSubscription);
   const subscription = normalizeSubscription(await responseData(subscriptionResponse));
-  await expect(page.getByRole('heading', { name: '订阅' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '我的服务' })).toBeVisible();
   await expect(page.getByText('订阅链接', { exact: true })).toBeVisible();
   await expectVisibleText(page, subscription.planName);
   if (subscription.expiresAt) {
@@ -144,7 +145,8 @@ test('普通用户 no-mock 运行时页面使用真实后端数据', async ({ pa
 });
 
 test('管理员 no-mock 运行时页面使用真实后端数据', async ({ page }) => {
-  test.setTimeout(60_000);
+  // 此案例跨多個工作區並執行 CRUD，遠端 SSH 通道需容納累計網路往返。
+  test.setTimeout(120_000);
 
   skipOrFailMissingCredentials(
     Boolean(runtimeAuth.adminAccount && runtimeAuth.adminPassword),
@@ -158,18 +160,21 @@ test('管理员 no-mock 运行时页面使用真实后端数据', async ({ page 
 
   const overviewResponse = await gotoAndWaitForApi(page, '/overview', API.operationsSummary);
   await responseData(overviewResponse);
-  await expect(page.getByRole('heading', { name: '概览' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '总览' })).toBeVisible();
   await expectMetricCard(page, '活跃用户', /\d+/);
   await expectMetricCard(page, '启用线路', /\d+/);
-  await expectMetricCard(page, '可用线路', /\d+/);
-  await expectMetricCard(page, '本月扣费流量', /\d+(?:\.\d+)? GB/);
-  await expectVisibleText(page, '中转节点运行态');
+  await expectMetricCard(page, '接入节点', /\d+/);
+  // 概覽已移除此卡片；扣費明細由流量日誌與營運介面驗證。
+  await expect(page.locator('.metric-card').filter({ hasText: '本月扣费流量' })).toHaveCount(0);
+  await expectVisibleText(page, '节点与配置');
   await expectVisibleText(page, '待同步节点');
 
   const operationsSummaryPromise = waitForApiResponse(page, API.operationsSummary);
   const operationsRoutingPromise = waitForApiResponse(page, API.accessRouting);
   await page.goto('/admin/access-operations');
   const operationsSummary = normalizeOperationsSummary(await responseData(await operationsSummaryPromise));
+  await page.getByText('展开诊断明细（10 分钟）', { exact: true }).click();
+  await page.getByRole('button', { name: '监控与保留设置', exact: true }).click();
   const operationsControlPlane = normalizeControlPlane(await responseData(await operationsRoutingPromise));
   // 监控中心合并页：默认「运行总览」tab 即原运营中心内容。
   await expect(page.getByRole('heading', { name: '监控中心' })).toBeVisible();
@@ -194,14 +199,13 @@ test('管理员 no-mock 运行时页面使用真实后端数据', async ({ page 
   await expectVisibleText(page, '连续失败阈值');
   await assertOperationsRuntimeLines(page, operationsControlPlane);
 
+  await gotoAndWaitForApi(page, '/admin/health-check', API.operationsSummary);
   const healthSummaryPromise = waitForApiResponse(page, API.operationsSummary);
   const healthRoutingPromise = waitForApiResponse(page, API.accessRouting);
-  // 健康检查已并入监控中心：旧路径重定向到监控中心，再切到「健康检查」tab 验证原内容。
-  await page.goto('/admin/health-check');
-  const healthSummary = normalizeOperationsSummary(await responseData(await healthSummaryPromise));
-  await healthRoutingPromise;
   await expect(page.getByRole('heading', { name: '监控中心' })).toBeVisible();
   await page.getByRole('tab', { name: '健康检查' }).click();
+  const healthSummary = normalizeOperationsSummary(await responseData(await healthSummaryPromise));
+  await healthRoutingPromise;
   await expectHealthCard(page, '中转节点', /\d+\/\d+/);
   await expectHealthCard(page, '线路', /\d+\/\d+/);
   await expectHealthCard(page, '运行数据', /.+/);
@@ -223,19 +227,8 @@ test('管理员 no-mock 运行时页面使用真实后端数据', async ({ page 
   await expectVisibleText(page, '新增中转节点');
   await expectVisibleText(page, '运行入口');
   await expectVisibleText(page, '活跃连接');
-  await expect(page.locator('.shell__menu').getByText('中转节点')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('入口管理')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('出口管理')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('分组', { exact: true })).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('套餐授权')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('用户管理')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('订单')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('兑换码')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('认证安全')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('审计日志')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('订阅设置')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('销售页配置')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Agent 安装说明', exact: true }).first()).toBeVisible();
+  await expectAdminWorkspaces(page);
+  await expect(page.getByRole('button', { name: 'Agent 安装说明', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '一键部署', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '部署/重装' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '运行数据' })).toHaveCount(0);
@@ -368,8 +361,9 @@ async function runAdminUserCrudNoMock(page: Page) {
     const deleteResponsePromise = page.waitForResponse((response) => (
       response.request().method() === 'DELETE' && new URL(response.url()).pathname === `/api/admin/users/${createdId}`
     ));
-    await page.locator('tr', { hasText: email }).getByRole('button', { name: '删除' }).click();
-    await page.getByRole('button', { name: '删除', exact: true }).last().click();
+    await page.locator('tr', { hasText: email }).getByRole('button', { name: '更多用户操作' }).click();
+    await page.getByRole('menuitem', { name: '删除用户' }).click();
+    await page.getByRole('dialog', { name: '删除用户', exact: true }).getByRole('button', { name: '删除', exact: true }).click();
     await deleteResponsePromise;
     createdIds.splice(createdIds.indexOf(createdId), 1);
     // 硬删后断言用户「行」消失即可（搜索框仍保留已输入的邮箱文本，getByText 全页面匹配会误命中筛选框，故锁定表格行）。

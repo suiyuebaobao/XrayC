@@ -299,7 +299,8 @@ test('管理员用户页可编辑用户并查看该用户流量日志', async ({
   const singleDeleteRequest = page.waitForRequest((request) => (
     new URL(request.url()).pathname === '/api/admin/users/1003' && request.method() === 'DELETE'
   ));
-  await page.locator('tr', { hasText: 'single-delete@example.test' }).getByRole('button', { name: '删除' }).click();
+  await page.locator('tr', { hasText: 'single-delete@example.test' }).getByRole('button', { name: '更多用户操作' }).click();
+  await page.getByRole('menuitem', { name: '删除用户', exact: true }).click();
   await page.getByRole('button', { name: '删除', exact: true }).last().click();
   await singleDeleteRequest;
   await expect(page.getByText('single-delete@example.test')).toHaveCount(0);
@@ -326,7 +327,8 @@ test('管理员用户页可编辑用户并查看该用户流量日志', async ({
   });
   await expect(page.getByText('legacy@example.test').first()).toBeVisible();
 
-  await page.locator('tr', { hasText: 'legacy@example.test' }).getByRole('button', { name: '流量日志' }).click();
+  await page.locator('tr', { hasText: 'legacy@example.test' }).getByRole('button', { name: '更多用户操作' }).click();
+  await page.getByRole('menuitem', { name: '流量日志', exact: true }).click();
   await expect.poll(() => trafficLogsLoaded).toBe(true);
   const drawer = page.getByRole('dialog', { name: /用户流量日志：legacy@example.test/ });
   // 表格列可横向滚动，逐个滚动到字段后再验证用户级日志内容。

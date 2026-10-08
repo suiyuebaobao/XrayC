@@ -327,3 +327,61 @@ async fn request_json(
     };
     (status, value)
 }
+
+#[tokio::test]
+async fn test_pg_system_info_requires_admin_and_returns_reported_versions() {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let store = PgStore::connect(&database_url).await.unwrap();
+    store.migrate("../../migrations").await.unwrap();
+    store.seed_demo_data().await.unwrap();
+    store
+        .register_worker_version("0.1.0", "fixture-release", 60)
+        .await
+        .unwrap();
+    let app = app(AppState::with_pg(store));
+    let unauth = request_json(
+        app.clone(),
+        Method::GET,
+        "/api/admin/system-info",
+        None,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(unauth.0, StatusCode::UNAUTHORIZED);
+    let user = request_json(
+        app.clone(),
+        Method::POST,
+        "/api/auth/login",
+        None,
+        json!({"account":"demo@example.test","password":xrayc_db::DEMO_USER_PASSWORD}),
+    )
+    .await;
+    let forbidden = request_json(
+        app.clone(),
+        Method::GET,
+        "/api/admin/system-info",
+        user.1["data"]["access_token"].as_str(),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(forbidden.0, StatusCode::FORBIDDEN);
+    let token = admin_token(app.clone()).await;
+    let response = request_json(
+        app,
+        Method::GET,
+        "/api/admin/system-info",
+        Some(&token),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(response.0, StatusCode::OK);
+    assert!(response.1["data"]["api"]["release_id"].is_string());
+    assert_eq!(
+        response.1["data"]["workers"][0]["release_id"],
+        "fixture-release"
+    );
+    assert_eq!(response.1["data"]["workers"][0]["fresh"], true);
+    assert!(!response.1.to_string().contains(xrayc_db::DEMO_AGENT_TOKEN));
+}

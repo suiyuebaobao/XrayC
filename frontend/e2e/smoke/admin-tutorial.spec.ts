@@ -25,7 +25,7 @@ test('管理员可以打开系统使用教程页面', async ({ page }) => {
   });
   await page.goto('/overview');
 
-  await expect(page.locator('.shell__menu').getByText('使用教程')).toBeVisible();
+  await expect(page.getByRole('link', { name: '帮助与教程', exact: true })).toBeVisible();
 
   await page.goto('/admin/tutorial');
   await expect(page.getByRole('heading', { name: '使用教程' })).toBeVisible();

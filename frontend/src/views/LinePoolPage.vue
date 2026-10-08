@@ -7,6 +7,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, onMounted, reactive, ref } from 'vue';
+import ExitEndpointEditorDialog from '@/views/shared/ExitEndpointEditorDialog.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import {
   apiClient,
@@ -33,8 +34,9 @@ import ExitEndpointsTable from './line-pool/ExitEndpointsTable.vue';
 const loading = ref(true);
 const saving = ref(false);
 const dialogOpen = ref(false);
-const editingEndpointId = ref('');
-const editingResourceId = ref('');
+const editorOpen = ref(false);
+const editingEndpoint = ref<ExitEndpointSummary>();
+const editingResource = ref<ExitResourceSummary>();
 const exitResources = ref<ExitResourceSummary[]>([]);
 const exitEndpoints = ref<ExitEndpointSummary[]>([]);
 const rawImportText = ref('');
@@ -66,7 +68,6 @@ const vlessSecurityMode = computed({
   },
 });
 const lineOutboundOptions = computed(() => outboundOptionsForRegion(form.regionCode));
-const dialogTitle = computed(() => editingEndpointId.value ? '查看/编辑线路' : '添加线路');
 const totalExitEndpoints = computed(() => exitEndpoints.value.length);
 const enabledExitEndpoints = computed(() =>
   exitEndpoints.value.filter((endpoint) => endpoint.enabled && endpoint.exitResourceEnabled).length,
@@ -101,8 +102,6 @@ async function load() {
 }
 
 function openCreateDialog() {
-  editingEndpointId.value = '';
-  editingResourceId.value = '';
   rawImportText.value = '';
   importLines.value = [];
   importErrors.value = [];
@@ -123,30 +122,9 @@ function openCreateDialog() {
 }
 
 function openEditDialog(endpoint: ExitEndpointSummary) {
-  if (endpoint.outboundType === 'direct') {
-    ElMessage.warning('历史 direct 线路只读，请新建普通线路替换。');
-    return;
-  }
-  const resource = resourceById.value.get(endpoint.exitResourceId);
-  editingEndpointId.value = endpoint.id;
-  editingResourceId.value = endpoint.exitResourceId;
-  rawImportText.value = '';
-  importLines.value = [];
-  importErrors.value = [];
-  Object.assign(form, {
-    resourceName: resource?.name || endpoint.resourceName || endpoint.name,
-    regionCode: resource?.region || '',
-    providerName: resource?.providerName || '',
-    ownership: resource?.ownership || 'third_party',
-    outboundType: endpoint.outboundType as ThirdPartyExitEndpointOutboundType,
-    host: endpoint.host,
-    port: endpoint.port,
-    outboundConfig: formatJson(endpoint.outboundConfig),
-    streamConfig: formatJson(endpoint.streamConfig),
-    probeConfig: formatJson(endpoint.probeConfig),
-    enabled: endpoint.enabled && endpoint.exitResourceEnabled,
-  });
-  dialogOpen.value = true;
+  editingEndpoint.value = endpoint;
+  editingResource.value = resourceById.value.get(endpoint.exitResourceId);
+  editorOpen.value = true;
 }
 
 function handleRawImportInput() {
@@ -214,11 +192,7 @@ async function submitLine() {
       throw new Error('线路地址和端口不能为空。');
     }
 
-    if (editingEndpointId.value) {
-      await updateLine(outboundConfig);
-    } else {
-      await createNewLine(outboundConfig);
-    }
+    await createNewLine(outboundConfig);
     dialogOpen.value = false;
     await load();
   } catch (error) {
@@ -248,28 +222,6 @@ async function createNewLine(outboundConfig: ExitEndpointConfig) {
     enabled: form.enabled,
   });
   ElMessage.success('线路已加入出口管理');
-}
-
-async function updateLine(outboundConfig: ExitEndpointConfig) {
-  await apiClient.updateExitResource(editingResourceId.value, {
-    name: form.resourceName,
-    region_code: form.regionCode,
-    provider_name: form.providerName,
-    ownership: form.ownership,
-    enabled: form.enabled,
-  });
-  await apiClient.updateExitEndpoint(editingEndpointId.value, {
-    exit_resource_id: editingResourceId.value,
-    name: form.resourceName,
-    outbound_type: form.outboundType,
-    host: form.host,
-    port: Number(form.port),
-    outbound_config: outboundConfig,
-    stream_config: parseJsonObject(form.streamConfig),
-    probe_config: parseJsonObject(form.probeConfig),
-    enabled: form.enabled,
-  });
-  ElMessage.success('线路已更新，关联中转节点将自动重新同步');
 }
 
 async function deleteLine(endpoint: ExitEndpointSummary) {
@@ -320,7 +272,9 @@ async function triggerProbe(endpoint: ExitEndpointSummary) {
     @probe="triggerProbe"
   />
 
-  <el-dialog v-model="dialogOpen" :title="dialogTitle" width="840px">
+  <ExitEndpointEditorDialog v-model="editorOpen" :endpoint-id="editingEndpoint?.id ?? ''" :initial-endpoint="editingEndpoint" :initial-resource="editingResource" @changed="load" />
+
+  <el-dialog v-model="dialogOpen" title="添加线路" width="840px">
     <el-alert
       class="line-pool-alert"
       type="info"
@@ -330,7 +284,7 @@ async function triggerProbe(endpoint: ExitEndpointSummary) {
     />
     <el-form label-position="top">
       <el-row :gutter="16">
-        <el-col v-if="!editingEndpointId" :span="24">
+        <el-col :span="24">
           <el-form-item label="原始线路配置">
             <el-input
               v-model="rawImportText"

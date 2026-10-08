@@ -280,10 +280,14 @@ async fn send_heartbeat(
     let response = client
         .heartbeat(&HeartbeatRequest {
             node_id: settings.node_id.clone(),
-            agent_version: AGENT_VERSION.to_owned(),
+            agent_version: option_env!("XRAYC_BUILD_ID")
+                .map(|release| format!("{AGENT_VERSION}+{release}"))
+                .unwrap_or_else(|| AGENT_VERSION.to_owned()),
             hostname: hostname(),
             core_type: settings.runtime_core,
-            xray_version: None,
+            xray_version: std::env::var("XRAYC_XRAY_VERSION")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             applied_config_version: applied_config_version.map(ToOwned::to_owned),
             uptime_seconds: uptime.as_secs(),
             tls_certificates: collect_tls_certificates(settings, active_config, node_domains),

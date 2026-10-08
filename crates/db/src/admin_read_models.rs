@@ -125,7 +125,8 @@ pub(super) fn admin_plan_json(row: AdminPlanRow, line_groups: Vec<Value>) -> Val
 }
 
 pub(super) fn admin_user_json(row: AdminUserListRow) -> Value {
-    let remaining_bytes = (row.limit_bytes - row.used_bytes).max(0);
+    let unlimited = row.limit_bytes == -1;
+    let remaining_bytes = if unlimited { -1 } else { (row.limit_bytes - row.used_bytes).max(0) };
     let effective_rate_limit_bps = row
         .user_rate_limit_bps
         .unwrap_or(row.plan_rate_limit_bps)
@@ -148,10 +149,11 @@ pub(super) fn admin_user_json(row: AdminUserListRow) -> Value {
         "expires_at": row.expires_at,
         "traffic_gb": {
             "used_gb": bytes_to_gb(row.used_bytes.max(0) as u64),
-            "total_gb": bytes_to_gb(row.limit_bytes.max(0) as u64)
+            "total_gb": if unlimited { -1.0 } else { bytes_to_gb(row.limit_bytes.max(0) as u64) }
         },
         "remaining_bytes": remaining_bytes,
-        "remaining_gb": bytes_to_gb(remaining_bytes as u64),
+        "remaining_gb": if unlimited { -1.0 } else { bytes_to_gb(remaining_bytes as u64) },
+        "traffic_unlimited": unlimited,
         "plan_rate_limit_bps": row.plan_rate_limit_bps.max(0),
         "user_rate_limit_bps": row.user_rate_limit_bps.map(|value| value.max(0)),
         "user_rate_limit_up_bps": row.user_rate_limit_up_bps,

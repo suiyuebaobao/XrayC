@@ -332,7 +332,12 @@ pub struct UserSubscription {
 
 impl UserSubscription {
     pub fn remaining_bytes(&self) -> u64 {
-        self.limit_bytes.saturating_sub(self.used_bytes)
+        // u64::MAX 是无流量上限标记；仍累计真实用量，0 仍代表零额度。
+        if self.limit_bytes == u64::MAX {
+            u64::MAX
+        } else {
+            self.limit_bytes.saturating_sub(self.used_bytes)
+        }
     }
 
     pub fn add_billed(&mut self, bytes: u64) {
@@ -510,4 +515,19 @@ mod node_domain_read_model_tests {
         assert_eq!(value["node_domain"]["domain"], "domain-b.example.test");
         assert_eq!(value["node_domain"]["kind"], "direct");
     }
+}
+
+#[test]
+fn unlimited_traffic_tracks_usage_without_exhaustion() {
+    let mut subscription = UserSubscription {
+        user_id: Uuid::nil(), plan_id: Uuid::nil(), active: true,
+        expires_at: Utc::now(), used_bytes: 1_000, limit_bytes: u64::MAX,
+    };
+    subscription.add_billed(500);
+    assert_eq!(subscription.used_bytes, 1_500);
+    assert_eq!(subscription.remaining_bytes(), u64::MAX);
+    subscription.limit_bytes = 0;
+    assert_eq!(subscription.remaining_bytes(), 0);
+    subscription.limit_bytes = 2_000;
+    assert_eq!(subscription.remaining_bytes(), 500);
 }

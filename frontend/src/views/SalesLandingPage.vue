@@ -1,97 +1,30 @@
 <!--
   本页面是面向访客的销售首页。
   它展示 VPN 套餐卖点、使用场景、套餐卡片和常见问题。
-  页面配置来自后台销售首页接口，接口失败时使用本地兜底内容。
+  页面配置来自后台；关闭销售首页时进入登录页，读取失败时明确显示错误。
 -->
 <script setup lang="ts">
 import { ArrowRight, Check, Connection } from '@element-plus/icons-vue';
 import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { apiClient, type SalesLandingConfig } from '@/services/api';
 
+const router = useRouter();
+const loadError = ref('');
 const landing = ref<SalesLandingConfig | null>(null);
 
 onMounted(async () => {
   try {
-    landing.value = await apiClient.getSalesLanding();
+    const configured = await apiClient.getSalesLanding();
+    if (configured.portalFeatures?.marketing === false) {
+      await router.replace('/login');
+      return;
+    }
+    landing.value = configured;
   } catch {
-    landing.value = fallbackLanding();
+    loadError.value = '首页暂时无法载入，请稍后重试。';
   }
 });
-
-function fallbackLanding(): SalesLandingConfig {
-  return {
-    eyebrow: 'Global Transit Access',
-    title: '稳定高速的全球中转流量套餐',
-    subtitle: '面向跨境办公、开发测试和高频出差场景，提供可订阅、可计量、可切换的中转节点服务。',
-    announcement: '新用户注册自动领取基础套餐，登录后即可复制订阅链接。',
-    primaryCtaLabel: '立即注册',
-    primaryCtaHref: '/register',
-    secondaryCtaLabel: '查看平台能力',
-    secondaryCtaHref: '/platform',
-    navLinks: [
-      { label: '套餐', href: '#plans' },
-      { label: '场景', href: '#scenarios' },
-      { label: 'FAQ', href: '#faq' },
-      { label: '登录', href: '/login' },
-    ],
-    heroStats: [
-      { label: '客户端订阅', value: 'Clash / mihomo' },
-      { label: '流量额度', value: '单一额度' },
-      { label: '开通方式', value: '套餐 / 兑换码' },
-    ],
-    features: [
-      { title: '多地区可用节点', description: '按套餐专区展示可连接中转入口，真实出口由后台统一调度。' },
-      { title: '统一流量计量', description: '套餐使用单一流量额度和扣费倍率，适配办公、资料检索和团队分发场景。' },
-      { title: '订阅链接即用', description: '登录后复制订阅链接，导入常见代理客户端即可同步中转入口。' },
-    ],
-    planCards: [
-      {
-        name: '基础体验',
-        price: '¥0',
-        period: '注册领取',
-        description: '用于验证订阅导入、节点质量和基础访问链路。',
-        highlights: ['自动开通基础套餐', '单一流量额度', '基础中转入口'],
-        featured: false,
-        ctaLabel: '免费注册',
-        ctaHref: '/register',
-      },
-      {
-        name: '标准流量',
-        price: '按套餐配置',
-        period: '周期包',
-        description: '适合日常跨境办公、资料检索和开发访问。',
-        highlights: ['更高流量额度', '多地区中转入口', '订阅链接重置'],
-        featured: true,
-        ctaLabel: '查看套餐',
-        ctaHref: '/plans',
-      },
-      {
-        name: '团队场景',
-        price: '按需开通',
-        period: '周期包',
-        description: '面向团队协作和多地区访问。',
-        highlights: ['统一流量计量', '单一扣费倍率', '授权入口展示'],
-        featured: false,
-        ctaLabel: '咨询开通',
-        ctaHref: '/register',
-      },
-    ],
-    scenarios: [
-      { title: '跨境办公', description: '稳定访问协作平台、开发工具和海外资料站点。' },
-      { title: '开发测试', description: '为接口联调、区域化验证和网络环境回归提供可控出口。' },
-      { title: '轻量团队', description: '通过套餐、兑换码和订阅链接快速分发访问能力。' },
-    ],
-    faqs: [
-      { question: '如何开始使用？', answer: '注册账号后进入用户首页，选择套餐或兑换码开通，再复制订阅链接导入客户端。' },
-      { question: '流量如何计算？', answer: '系统按套餐总流量统一统计，并使用套餐配置的单一扣费倍率。' },
-    ],
-    footerLinks: [
-      { label: '平台介绍', href: '/platform' },
-      { label: '用户登录', href: '/login' },
-    ],
-    updatedAt: '',
-  };
-}
 </script>
 
 <template>
@@ -200,10 +133,11 @@ function fallbackLanding(): SalesLandingConfig {
     </footer>
   </main>
 
-  <main v-else class="marketing-page marketing-page--loading" aria-label="销售首页加载中">
-    <section class="marketing-loading">
-      <el-skeleton animated :rows="8" />
-    </section>
+  <main v-else class="marketing-page">
+    <el-result v-if="loadError" icon="warning" title="首页暂时无法载入" :sub-title="loadError">
+      <template #extra><RouterLink to="/login"><el-button type="primary">进入登录页</el-button></RouterLink></template>
+    </el-result>
+    <el-skeleton v-else :rows="8" animated />
   </main>
 </template>
 

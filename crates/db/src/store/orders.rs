@@ -352,7 +352,8 @@ impl PgStore {
                 plan_id = EXCLUDED.plan_id,
                 active = TRUE,
                 expires_at = $3,
-                limit_bytes = user_subscriptions.limit_bytes + EXCLUDED.limit_bytes,
+                limit_bytes = CASE WHEN user_subscriptions.limit_bytes = -1 OR EXCLUDED.limit_bytes = -1
+                    THEN -1 ELSE user_subscriptions.limit_bytes + EXCLUDED.limit_bytes END,
                 updated_at = now()
             "#,
         )

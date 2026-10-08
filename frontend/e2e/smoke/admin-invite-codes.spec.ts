@@ -65,7 +65,7 @@ test('管理员可以打开邀请码管理页面并看到生成入口', async ({
 
   await page.goto('/admin/invite-codes');
   await expect(page.getByRole('heading', { name: '邀请码管理' })).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('邀请码')).toBeVisible();
+  await expect(page.getByRole('link', { name: '邀请注册', exact: true })).toBeVisible();
   await expect(page.getByText('INV-SMOKE-001')).toBeVisible();
   await expect(page.getByText('INV-SMOKE-USED')).toBeVisible();
   await expect(page.getByText('user@example.test')).toBeVisible();

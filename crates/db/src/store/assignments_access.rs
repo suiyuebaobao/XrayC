@@ -69,7 +69,7 @@ impl PgStore {
         let subscription = sqlx::query_as::<_, AssignmentSubscriptionRow>(
             r#"
             SELECT s.plan_id,
-                   s.limit_bytes - s.used_bytes AS remaining_bytes
+                   CASE WHEN s.limit_bytes = -1 THEN 9223372036854775807 ELSE s.limit_bytes - s.used_bytes END AS remaining_bytes
             FROM user_subscriptions s
             JOIN users u ON u.id = s.user_id
             WHERE s.user_id = $1

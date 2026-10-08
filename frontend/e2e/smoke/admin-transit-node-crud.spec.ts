@@ -1,3 +1,4 @@
+import { openNodeOnboarding } from '../helpers/node-onboarding';
 // 用途：覆盖中转节点编辑、批量删除和本机出口服务弹窗。
 // 本用例使用 Playwright 路由 mock，只验证前端动作和 API 契约。
 // 真实链路仍由脚本和远端服务器 E2E 覆盖。
@@ -84,7 +85,7 @@ test('管理员可以创建一键安装 Agent 任务', async ({ page }) => {
   });
 
   await page.goto('/admin/transit-nodes');
-  await page.getByRole('button', { name: '一键安装 Agent' }).click();
+  await openNodeOnboarding(page, 'automatic');
   const dialog = page.getByRole('dialog', { name: '一键安装 Agent' });
   await expect(dialog).toBeVisible();
 
@@ -298,5 +299,5 @@ test('部署任务按服务器地址聚合并支持失败重试预填', async ({
   // SSH Host 是独立 SSH IP 字段，重试只回填任务原 ssh_host，绝不退回客户连接地址（public_host）。
   await expect(installDialog.locator('.el-form-item').filter({ hasText: 'SSH Host' }).locator('input')).toHaveValue('192.0.2.10');
   await expect(installDialog.getByText('一键安装会自动连接服务器、上传并执行脚本；无需手动上传。')).toBeVisible();
-  await expect(installDialog.getByText('安装前会先卸载旧容器和旧运行状态。')).toBeVisible();
+  await expect(installDialog.getByText('会先检查中心连线与安装文件，再更新节点运行环境。')).toBeVisible();
 });

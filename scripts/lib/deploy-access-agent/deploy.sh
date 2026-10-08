@@ -131,77 +131,16 @@ extract_binary() {
   log "extracted $(basename "$dest") from Docker image"
 }
 
-cleanup_existing_compose_project_for_force_reinstall() {
-  [[ "${OVERWRITE_RUNTIME_CONFIG:-false}" == "true" ]] || return 0
-
-  log "cleaning existing Docker Compose project before forced reinstall"
-  if [[ -f "${INSTALL_DIR}/docker-compose.yml" ]]; then
-    compose_run -f "${INSTALL_DIR}/docker-compose.yml" -p "$COMPOSE_PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
-  fi
-
-  local stale_containers
-  stale_containers="$(docker_run ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" 2>/dev/null || true)"
-  if [[ -n "$stale_containers" ]]; then
-    # 同一 compose project 多次换节点 ID 时，容器名会跟随节点 ID 变化。
-    # 按 compose project 标签清理，避免旧 Xray 继续占用 stats API 或入口端口。
-    # shellcheck disable=SC2086
-    docker_run rm -f $stale_containers >/dev/null 2>&1 || true
-  fi
-}
-
-cleanup_existing_install_files_for_force_reinstall() {
-  [[ "${OVERWRITE_RUNTIME_CONFIG:-false}" == "true" ]] || return 0
-
-  log "removing existing runtime files before forced reinstall"
-  run_root rm -rf \
-    "$ARTIFACT_DIR" \
-    "${INSTALL_DIR}/bin" \
-    "$XRAY_HOST_CONFIG_DIR" \
-    "$XRAY_HOST_LOG_DIR" \
-    "${INSTALL_DIR}/state" \
-    "${INSTALL_DIR}/access-agent.env" \
-    "${INSTALL_DIR}/docker-compose.yml" \
-    >/dev/null 2>&1 || true
-}
-
-cleanup_legacy_compose_projects() {
-  [[ "${CLEAN_LEGACY_COMPOSE_PROJECTS:-true}" == "true" ]] || return 0
-
-  local legacy_project="xrayc-access"
-  if [[ "$COMPOSE_PROJECT_NAME" == "$legacy_project" ]]; then
+rollback_failed_deploy() {
+  [[ "$DEPLOY_ROLLBACK_ON_FAILURE" == "true" ]] || return 0
+  if [[ "${DEPLOY_RUNTIME_MUTATION_STARTED:-0}" != "1" ]]; then
+    log "preflight failed before runtime changes; preserving existing installation"
     return 0
   fi
 
-  local legacy_dir="/opt/xrayc/access-agent"
-  if [[ -f "${legacy_dir}/docker-compose.yml" ]]; then
-    log "cleaning legacy Docker Compose project"
-    compose_run -f "${legacy_dir}/docker-compose.yml" -p "$legacy_project" down --remove-orphans >/dev/null 2>&1 || true
-  fi
+  log "deployment failed; restoring preserved XrayC installation"
+  restore_preserved_installation || log "rollback could not fully restore the previous instance; preserved files and containers remain available"
 
-  local legacy_containers
-  legacy_containers="$(docker_run ps -aq --filter "label=com.docker.compose.project=xrayc-access" 2>/dev/null || true)"
-  if [[ -n "$legacy_containers" ]]; then
-    log "removing legacy Docker Compose containers"
-    # shellcheck disable=SC2086
-    docker_run rm -f $legacy_containers >/dev/null 2>&1 || true
-  fi
-}
-
-rollback_failed_deploy() {
-  [[ "$DEPLOY_ROLLBACK_ON_FAILURE" == "true" ]] || return 0
-
-  log "deployment failed; rolling back files and containers created by this run"
-  if [[ "$DEPLOY_COMPOSE_UP_ATTEMPTED" == "1" && -n "${COMPOSE_PROJECT_NAME:-}" && -f "${INSTALL_DIR}/docker-compose.yml" ]]; then
-    compose_run -f "${INSTALL_DIR}/docker-compose.yml" -p "$COMPOSE_PROJECT_NAME" down --remove-orphans >/dev/null 2>&1 || true
-  fi
-  if [[ "$DEPLOY_CONTAINER_NAMES_TOUCHED" == "1" && ( -n "${agent_container:-}" || -n "${xray_container:-}" ) ]]; then
-    docker_run rm -f ${agent_container:+"$agent_container"} ${xray_container:+"$xray_container"} >/dev/null 2>&1 || true
-  fi
-  if [[ "$DEPLOY_CREATED_INSTALL_DIR" == "1" || "$DEPLOY_ROLLBACK_REMOVE_EXISTING" == "true" ]]; then
-    run_root rm -rf "$INSTALL_DIR" >/dev/null 2>&1 || true
-  else
-    log "install directory existed before deploy; leaving files in place unless XRAYC_DEPLOY_ROLLBACK_REMOVE_EXISTING=true"
-  fi
 }
 
 cleanup_all() {

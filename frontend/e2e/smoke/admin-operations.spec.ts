@@ -139,6 +139,8 @@ test('运营中心主动探测按钮可触发且运行态缺失值不显示假 0
   });
 
   await page.goto('/admin/access-operations');
+  await page.getByText('展开诊断明细（10 分钟）', { exact: true }).click();
+  await page.getByRole('button', { name: '监控与保留设置', exact: true }).click();
   await expect(page.getByRole('heading', { name: '监控中心' })).toBeVisible();
   await expect(page.locator('.metric-card').filter({ hasText: '在线用户' }).locator('strong')).toHaveText('未上报');
   await expect(page.locator('.metric-card').filter({ hasText: '活跃连接' }).locator('strong')).toHaveText('未上报');

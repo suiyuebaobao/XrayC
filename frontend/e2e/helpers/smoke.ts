@@ -38,6 +38,23 @@ export async function expectDialogOpensAndCloses(page: Page, buttonName: string,
 }
 
 export async function mockAdminSession(page: Page) {
+  // 節點與入口頁共同載入這兩個集合；各用例可再註冊路由覆寫預設資料。
+  // 避免 placeholder JWT 落到真實後端而使 Promise.all 整批載入失敗。
+  for (const [path, data] of [
+    ['access-entries', { access_entries: [] }],
+    ['exit-resources', { exit_resources: [] }],
+  ] as const) {
+    await page.route(`**/api/admin/${path}`, async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data }),
+      });
+    });
+  }
   await page.addInitScript(() => {
     window.localStorage.setItem(
       'xrayc.session',

@@ -180,10 +180,9 @@ test('普通用户可以登录并查看订阅信息', async ({ page }) => {
   await page.goto('/dashboard');
 
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole('heading', { name: '首页' })).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('首页')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('套餐')).toBeVisible();
-  await expect(page.locator('.shell__menu').getByText('订阅')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '我的服务' })).toBeVisible();
+  await expect(page.getByRole('complementary').getByRole('link', { name: '我的服务', exact: true })).toBeVisible();
+  await expect(page.getByRole('complementary').getByRole('link', { name: '套餐', exact: true })).toBeVisible();
 
   await page.goto('/plans');
   await expect(page.getByRole('heading', { name: '套餐' })).toBeVisible();
@@ -191,9 +190,9 @@ test('普通用户可以登录并查看订阅信息', async ({ page }) => {
   // 旧的「支付暂停」按钮已移除，现套餐页每个套餐卡片提供「购买」按钮发起真实下单。
   await expect(page.getByRole('button', { name: '购买' }).first()).toBeVisible();
 
-  await page.locator('.shell__menu').getByText('订阅').click();
-  await expect(page).toHaveURL(/\/subscription$/);
-  await expect(page.getByRole('heading', { name: '订阅' })).toBeVisible();
+  await page.getByRole('complementary').getByRole('link', { name: '我的服务', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole('heading', { name: '我的服务' })).toBeVisible();
   await expect(page.getByText('基础套餐')).toBeVisible();
   await expect(page.locator('.el-card').filter({ hasText: '订阅链接' }).locator('input')).toHaveValue(/\/sub\/demo-token$/);
   await expect(page.getByText('可用节点', { exact: true })).toBeVisible();
@@ -207,7 +206,7 @@ test('普通用户可以登录并查看订阅信息', async ({ page }) => {
   await expect(page.getByText('secret-agent-token')).toHaveCount(0);
   await expect(page.getByText('legacy-line-icon')).toHaveCount(0);
   await expect(page.getByText('legacy-group-icon')).toHaveCount(0);
-  await expect(page.locator('.shell__menu').getByText('中转节点')).toHaveCount(0);
+  await expect(page.getByRole('complementary').getByRole('link', { name: '节点', exact: true })).toHaveCount(0);
   await page.goto('/orders');
   await expect(page.getByRole('heading', { name: '我的订单' })).toBeVisible();
   await expect(page.getByText('支付功能暂停')).toBeVisible();

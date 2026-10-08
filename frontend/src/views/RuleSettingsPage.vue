@@ -71,7 +71,7 @@ async function load() {
 async function saveCommonRules() {
   savingCommon.value = true;
   try {
-    applySettings(await apiClient.updateSubscriptionSettings({ ...settings }));
+    applySettings(await apiClient.updateSubscriptionSettings({ defaultRules: [...settings.defaultRules] }));
     ElMessage.success('通用规则已保存');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存通用规则失败');

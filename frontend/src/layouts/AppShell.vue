@@ -1,180 +1,191 @@
-<!--
-  本布局用于登录后的用户后台和管理员后台。
-  它渲染侧边菜单、顶部栏和当前子路由内容。
-  菜单权限依据当前 session 角色计算。
--->
+<!-- 后台工作区布局：分组导航、上下文页签和移动端抽屉；不改变现有路由权限或业务 API。 -->
 <script setup lang="ts">
 import {
-  Brush,
-  Collection,
+  DataBoard,
   Connection,
-  CreditCard,
-  Discount,
-  DocumentChecked,
-  FolderChecked,
-  HomeFilled,
-  Lock,
-  Monitor,
-  Money,
-  Reading,
-  Setting,
-  SwitchButton,
-  Tickets,
   User,
-} from '@element-plus/icons-vue';
-import { computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { useSessionStore } from '@/stores/session';
+  Tickets,
+  SetUp,
+  Monitor,
+  Setting,
+  Document,
+  Present,
+  UserFilled,
+  Lock,
+  QuestionFilled,
+  TopRight,
+  SwitchButton,
+  Fold,
+  ArrowRight,
+} from "@element-plus/icons-vue";
+import { computed, onMounted, onUnmounted, ref, watch, type Component } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { usePortalFeaturesStore } from "@/stores/portalFeatures";
+import { useSessionStore } from "@/stores/session";
+import { adminWorkspaces, userNavigation, workspaceForPath } from "./navigation";
 
+const icons = {
+  DataBoard,
+  Connection,
+  User,
+  Tickets,
+  SetUp,
+  Monitor,
+  Setting,
+  Document,
+  Present,
+  UserFilled,
+  Lock,
+  QuestionFilled,
+  TopRight,
+  SwitchButton,
+  Fold,
+  ArrowRight,
+};
 const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
-
-const activePath = computed(() => route.path);
-
+const portal = usePortalFeaturesStore();
+onMounted(() => { void portal.load(); });
+const userPath = computed(() => route.path === '/subscription' ? '/dashboard' : route.path);
+const visibleUserNavigation = computed(() => userNavigation.filter((item) => {
+  const feature = ({ '/plans': 'plans', '/orders': 'orders', '/redeem': 'redeem', '/invite-codes': 'invites' } as const)[item.path as '/plans' | '/orders' | '/redeem' | '/invite-codes'];
+  return !feature || portal.features[feature];
+}));
+const navigationOpen = ref(false);
+const mobileQuery = window.matchMedia("(max-width: 760px)");
+const isMobile = ref(mobileQuery.matches);
+const updateMobile = () => {
+  isMobile.value = mobileQuery.matches;
+  if (!isMobile.value) navigationOpen.value = false;
+};
+mobileQuery.addEventListener("change", updateMobile);
+onUnmounted(() => mobileQuery.removeEventListener("change", updateMobile));
+const workspace = computed(() => workspaceForPath(route.path));
+const sections = ["日常管理", "运维", "系统"] as const;
+const currentLabel = computed(() =>
+  session.isAdmin
+    ? (workspace.value?.label ?? (route.path === "/admin/tutorial" ? "帮助中心" : "控制台"))
+    : (userNavigation.find((item) => item.path === userPath.value)?.label ?? "我的账户"),
+);
+const currentTab = computed(() => workspace.value?.tabs.find((tab) => tab.path === route.path));
+const preview = import.meta.env.VITE_UI_PREVIEW === "true";
+const iconFor = (name: string) => (icons as Record<string, Component>)[name] ?? icons.Setting;
+watch(
+  () => route.fullPath,
+  () => {
+    navigationOpen.value = false;
+  },
+);
 async function logout() {
   await session.logout();
-  router.push('/login');
+  await router.push("/login");
 }
 </script>
 
 <template>
-  <el-container class="shell">
-    <el-aside class="shell__aside" width="236px">
-      <div class="brand">
-        <div class="brand__mark">XC</div>
-        <div>
-          <strong>XrayC</strong>
-          <span>V2 运营控制台</span>
+  <div class="console-shell" @keydown.esc="navigationOpen = false">
+    <button v-if="navigationOpen" class="console-backdrop" aria-label="关闭导航" @click="navigationOpen = false" />
+    <aside
+      id="workspace-navigation"
+      class="console-sidebar"
+      :class="{ 'is-open': navigationOpen }"
+      :inert="isMobile && !navigationOpen"
+      :aria-hidden="isMobile && !navigationOpen ? true : undefined"
+      aria-label="工作区导航"
+    >
+      <RouterLink class="console-brand" :to="session.isAdmin ? '/overview' : '/dashboard'">
+        <span class="console-brand__mark"
+          ><el-icon><icons.Connection /></el-icon
+        ></span>
+        <span>XrayC<small>CONTROL CENTER</small></span>
+      </RouterLink>
+      <div class="console-space">
+        <span class="console-space__dot" /><span>{{ session.isAdmin ? "运营工作区" : "用户中心" }}</span
+        ><small>{{ preview ? "预览" : "V2" }}</small>
+      </div>
+      <nav class="console-navigation">
+        <template v-if="session.isAdmin">
+          <section v-for="section in sections" :key="section" class="console-navgroup">
+            <p class="console-navgroup__label">{{ section }}</p>
+            <RouterLink
+              v-for="item in adminWorkspaces.filter((entry) => entry.section === section)"
+              :key="item.id"
+              :to="item.path"
+              class="console-navitem"
+              :class="{ 'is-active': workspace?.id === item.id }"
+              :aria-current="workspace?.id === item.id ? 'page' : undefined"
+            >
+              <el-icon><component :is="iconFor(item.icon)" /></el-icon><span>{{ item.label }}</span>
+              <span v-if="workspace?.id === item.id" class="console-navitem__marker" />
+            </RouterLink>
+          </section>
+        </template>
+        <section v-else class="console-navgroup">
+          <RouterLink
+            v-for="item in visibleUserNavigation"
+            :key="item.path"
+            :to="item.path"
+            class="console-navitem"
+            :class="{ 'is-active': userPath === item.path }"
+            :aria-current="userPath === item.path ? 'page' : undefined"
+          >
+            <el-icon><component :is="iconFor(item.icon)" /></el-icon><span>{{ item.label }}</span>
+          </RouterLink>
+        </section>
+      </nav>
+      <div class="console-sidebar__footer">
+        <RouterLink v-if="session.isAdmin" to="/admin/tutorial" class="console-help"
+          ><el-icon><icons.QuestionFilled /></el-icon>帮助与教程<el-icon><icons.TopRight /></el-icon
+        ></RouterLink>
+        <div class="console-profile">
+          <span class="console-avatar">{{ (session.user?.name || session.user?.account || "A").slice(0, 1).toUpperCase() }}</span>
+          <div>
+            <strong>{{ session.user?.account || session.user?.name }}</strong
+            ><small>{{ session.isAdmin ? "管理员" : "用户" }}</small>
+          </div>
+          <el-button text class="console-logout" aria-label="退出登录" @click="logout"
+            ><el-icon><icons.SwitchButton /></el-icon
+          ></el-button>
         </div>
       </div>
-
-      <el-menu :default-active="activePath" router class="shell__menu">
-        <el-menu-item v-if="session.isAdmin" index="/overview">
-          <el-icon><HomeFilled /></el-icon>
-          <span>概览</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/tutorial">
-          <el-icon><Reading /></el-icon>
-          <span>使用教程</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/access-operations">
-          <el-icon><Monitor /></el-icon>
-          <span>监控中心</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/transit-nodes">
-          <el-icon><Connection /></el-icon>
-          <span>中转节点</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/access-entries">
-          <el-icon><Connection /></el-icon>
-          <span>入口管理</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/line-pool">
-          <el-icon><Connection /></el-icon>
-          <span>出口管理</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/line-groups">
-          <el-icon><Monitor /></el-icon>
-          <span>分组</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/rule-settings">
-          <el-icon><Setting /></el-icon>
-          <span>规则设置</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/plans">
-          <el-icon><Collection /></el-icon>
-          <span>套餐授权</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/users">
-          <el-icon><User /></el-icon>
-          <span>用户管理</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/traffic-logs">
-          <el-icon><Tickets /></el-icon>
-          <span>用户流量日志</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/orders">
-          <el-icon><Money /></el-icon>
-          <span>订单</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/redeem-codes">
-          <el-icon><Discount /></el-icon>
-          <span>兑换码</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/invite-codes">
-          <el-icon><Tickets /></el-icon>
-          <span>邀请码</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/auth-security">
-          <el-icon><Lock /></el-icon>
-          <span>认证安全</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/payment-settings">
-          <el-icon><CreditCard /></el-icon>
-          <span>支付设置</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/audit-logs">
-          <el-icon><DocumentChecked /></el-icon>
-          <span>审计日志</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/database-backup">
-          <el-icon><FolderChecked /></el-icon>
-          <span>数据库备份</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/subscription-settings">
-          <el-icon><Setting /></el-icon>
-          <span>订阅设置</span>
-        </el-menu-item>
-        <el-menu-item v-if="session.isAdmin" index="/admin/sales-landing">
-          <el-icon><Brush /></el-icon>
-          <span>销售页配置</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/dashboard">
-          <el-icon><HomeFilled /></el-icon>
-          <span>首页</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/plans">
-          <el-icon><Collection /></el-icon>
-          <span>套餐</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/subscription">
-          <el-icon><Tickets /></el-icon>
-          <span>订阅</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/orders">
-          <el-icon><Collection /></el-icon>
-          <span>我的订单</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/redeem">
-          <el-icon><Tickets /></el-icon>
-          <span>兑换码</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/invite-codes">
-          <el-icon><Tickets /></el-icon>
-          <span>邀请码</span>
-        </el-menu-item>
-        <el-menu-item v-if="!session.isAdmin" index="/account/password">
-          <el-icon><Lock /></el-icon>
-          <span>修改密码</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
-
-    <el-container>
-      <el-header class="shell__header">
-        <div class="shell__hint">
-          <el-icon><Connection /></el-icon>
-          核心配置：出口管理先加线路，入口管理绑定出口，分组用于套餐授权和归类。
+    </aside>
+    <div class="console-body">
+      <header class="console-topbar">
+        <div class="console-breadcrumb">
+          <el-button
+            text
+            class="console-menu-toggle"
+            aria-label="打开导航"
+            :aria-expanded="navigationOpen"
+            aria-controls="workspace-navigation"
+            @click="navigationOpen = !navigationOpen"
+            ><el-icon><icons.Fold /></el-icon></el-button
+          ><span>{{ session.isAdmin ? "工作区" : "用户中心" }}</span
+          ><el-icon><icons.ArrowRight /></el-icon><strong>{{ currentLabel }}</strong
+          ><template v-if="currentTab"
+            ><el-icon><icons.ArrowRight /></el-icon><span class="console-breadcrumb__current">{{ currentTab.label }}</span></template
+          >
         </div>
-        <div class="shell__user">
-          <span>{{ session.user?.name }}</span>
-          <el-button :icon="SwitchButton" text @click="logout">退出</el-button>
+        <div class="console-topbar__right">
+          <span v-if="preview" class="console-preview-label">本机预览 · 示例数据</span><span v-else class="console-version">XrayC V2</span
+          ><span class="console-avatar console-avatar--small">{{ session.isAdmin ? "A" : "U" }}</span>
         </div>
-      </el-header>
-      <el-main class="shell__main">
-        <RouterView />
-      </el-main>
-    </el-container>
-  </el-container>
+      </header>
+      <nav v-if="session.isAdmin && workspace && workspace.tabs.length > 1" class="workspace-tabs" :aria-label="`${workspace.label}分类`">
+        <RouterLink
+          v-for="tab in workspace.tabs"
+          :key="tab.path"
+          :to="tab.path"
+          :class="{ 'is-active': route.path === tab.path }"
+          :aria-current="route.path === tab.path ? 'page' : undefined"
+          >{{ tab.label }}</RouterLink
+        >
+      </nav>
+      <main class="console-main"><RouterView /></main>
+      <footer class="console-footnote">
+        XrayC <span>·</span> {{ session.isAdmin ? "配置、授权与运行状态，清楚可见。" : "你的服务与订阅。" }}
+      </footer>
+    </div>
+  </div>
 </template>

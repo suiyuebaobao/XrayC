@@ -26,6 +26,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
                    ul.access_line_id,
                    al.access_node_id,
                    ul.exit_endpoint_id,
+                   ul.routing_snapshot_id,
                    ul.delta_uplink,
                    ul.delta_downlink,
                    CASE
@@ -38,7 +39,8 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
                    ul.collected_at
             FROM usage_ledgers ul
             LEFT JOIN access_lines al ON al.id = ul.access_line_id
-            WHERE ul.collected_at < now() - ($1::BIGINT * interval '1 day')
+            WHERE ul.preserve_on_cleanup = FALSE
+              AND ul.collected_at < now() - ($1::BIGINT * interval '1 day')
             ORDER BY ul.collected_at ASC, ul.id ASC
             LIMIT $2
             FOR UPDATE OF ul SKIP LOCKED
@@ -46,7 +48,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
         daily_rolled AS (
             INSERT INTO usage_daily_rollups (
                 traffic_source, rollup_date, user_id, xray_user_key, access_line_id,
-                access_node_id, exit_endpoint_id, ledger_count,
+                access_node_id, exit_endpoint_id, routing_snapshot_id, ledger_count,
                 delta_uplink, delta_downlink, delta_total,
                 billed_uplink, billed_downlink, billed_bytes,
                 first_collected_at, last_collected_at, updated_at
@@ -58,6 +60,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
                    access_line_id,
                    access_node_id,
                    exit_endpoint_id,
+                   routing_snapshot_id,
                    COUNT(*)::BIGINT,
                    COALESCE(SUM(delta_uplink), 0)::BIGINT,
                    COALESCE(SUM(delta_downlink), 0)::BIGINT,
@@ -70,7 +73,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
                    now()
             FROM old_rows
             GROUP BY traffic_source, rollup_date, user_id, xray_user_key, access_line_id,
-                     access_node_id, exit_endpoint_id
+                     access_node_id, exit_endpoint_id, routing_snapshot_id
             ON CONFLICT ON CONSTRAINT usage_daily_rollups_dimension_key DO UPDATE SET
                 ledger_count = usage_daily_rollups.ledger_count + EXCLUDED.ledger_count,
                 delta_uplink = usage_daily_rollups.delta_uplink + EXCLUDED.delta_uplink,
@@ -93,7 +96,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
         hourly_rolled AS (
             INSERT INTO usage_hourly_rollups (
                 traffic_source, hour_start, user_id, xray_user_key, access_line_id,
-                access_node_id, exit_endpoint_id, ledger_count,
+                access_node_id, exit_endpoint_id, routing_snapshot_id, ledger_count,
                 delta_uplink, delta_downlink, delta_total,
                 billed_uplink, billed_downlink, billed_bytes,
                 first_collected_at, last_collected_at, updated_at
@@ -105,6 +108,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
                    access_line_id,
                    access_node_id,
                    exit_endpoint_id,
+                   routing_snapshot_id,
                    COUNT(*)::BIGINT,
                    COALESCE(SUM(delta_uplink), 0)::BIGINT,
                    COALESCE(SUM(delta_downlink), 0)::BIGINT,
@@ -117,7 +121,7 @@ pub(crate) async fn roll_up_and_prune_usage_ledgers_in_tx(
                    now()
             FROM old_rows
             GROUP BY traffic_source, hour_start, user_id, xray_user_key, access_line_id,
-                     access_node_id, exit_endpoint_id
+                     access_node_id, exit_endpoint_id, routing_snapshot_id
             ON CONFLICT ON CONSTRAINT usage_hourly_rollups_dimension_key DO UPDATE SET
                 ledger_count = usage_hourly_rollups.ledger_count + EXCLUDED.ledger_count,
                 delta_uplink = usage_hourly_rollups.delta_uplink + EXCLUDED.delta_uplink,

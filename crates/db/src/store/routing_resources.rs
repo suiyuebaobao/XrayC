@@ -12,7 +12,6 @@ use super::dirty::*;
 use super::existence::*;
 use super::line_binding::*;
 use super::probes::*;
-use super::routing_access_line_cleanup::detach_usage_for_access_lines_in_tx;
 use super::rows::*;
 use crate::*;
 use serde_json::{json, Map, Value};
@@ -338,70 +337,11 @@ impl PgStore {
 
     pub async fn delete_admin_exit_endpoint(&self, exit_endpoint_id: Uuid) -> Result<u64, DbError> {
         let mut tx = self.pool.begin().await?;
-        let resource_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT exit_resource_id FROM exit_endpoints WHERE id = $1",
-        )
-        .bind(exit_endpoint_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| {
-            DbError::InvalidAgentPayload(format!("出口端点不存在: {exit_endpoint_id}"))
-        })?;
-        let affected_pool_ids = sqlx::query_scalar::<_, Uuid>(
-            "SELECT exit_pool_id FROM exit_pool_members WHERE exit_endpoint_id = $1",
-        )
-        .bind(exit_endpoint_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        let deleted_access_line_ids = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM access_lines WHERE exit_endpoint_id = $1 ORDER BY id",
-        )
-        .bind(exit_endpoint_id)
-        .fetch_all(&mut *tx)
-        .await?;
-
-        // 删除出口会改变运行出口集合成员和用户出口映射，必须先脏标记再让外键级联清理。
-        mark_nodes_dirty_for_endpoint_in_tx(
-            &mut tx,
-            exit_endpoint_id,
-            "admin_deleted_exit_endpoint",
-        )
-        .await?;
-        detach_usage_for_access_lines_in_tx(&mut tx, &deleted_access_line_ids).await?;
-        sqlx::query("DELETE FROM user_exit_assignments WHERE exit_endpoint_id = $1")
-            .bind(exit_endpoint_id)
-            .execute(&mut *tx)
+        let deleted = self
+            .delete_exit_endpoint_in_tx(&mut tx, exit_endpoint_id)
             .await?;
-        sqlx::query("DELETE FROM access_lines WHERE exit_endpoint_id = $1")
-            .bind(exit_endpoint_id)
-            .execute(&mut *tx)
-            .await?;
-        let result = sqlx::query("DELETE FROM exit_endpoints WHERE id = $1")
-            .bind(exit_endpoint_id)
-            .execute(&mut *tx)
-            .await?;
-        for pool_id in &affected_pool_ids {
-            mark_nodes_dirty_for_pool_in_tx(&mut tx, *pool_id, "admin_deleted_exit_endpoint")
-                .await?;
-        }
-        if !affected_pool_ids.is_empty() {
-            prune_unusable_exit_pool_lines_in_tx(&mut tx, &affected_pool_ids).await?;
-        }
-        sqlx::query(
-            r#"
-            DELETE FROM exit_resources r
-            WHERE r.id = $1
-              AND r.ownership = 'third_party'
-              AND NOT EXISTS (
-                  SELECT 1 FROM exit_endpoints e WHERE e.exit_resource_id = r.id
-              )
-            "#,
-        )
-        .bind(resource_id)
-        .execute(&mut *tx)
-        .await?;
         tx.commit().await?;
-        Ok(result.rows_affected())
+        Ok(deleted)
     }
 
     pub(crate) async fn ensure_exit_endpoint_resource_compatible(

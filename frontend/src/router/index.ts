@@ -85,6 +85,12 @@ export const router = createRouter({
           meta: { admin: true },
         },
         {
+          path: 'admin/lines',
+          name: 'lines-workspace',
+          component: () => import('@/views/LinesWorkspacePage.vue'),
+          meta: { admin: true },
+        },
+        {
           path: 'admin/access-entries',
           name: 'access-entries',
           component: () => import('@/views/AccessEntriesPage.vue'),
@@ -160,6 +166,12 @@ export const router = createRouter({
           path: 'admin/database-backup',
           name: 'admin-database-backup',
           component: () => import('@/views/backup/DatabaseBackupPage.vue'),
+          meta: { admin: true },
+        },
+        {
+          path: 'admin/system-info',
+          name: 'admin-system-info',
+          component: () => import('@/views/SystemInfoPage.vue'),
           meta: { admin: true },
         },
         {

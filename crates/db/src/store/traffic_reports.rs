@@ -289,8 +289,11 @@ impl PgStore {
             });
         };
 
-        let remaining =
-            to_u64(subscription.limit_bytes).saturating_sub(to_u64(subscription.used_bytes));
+        let remaining = if subscription.limit_bytes == -1 {
+            u64::MAX
+        } else {
+            to_u64(subscription.limit_bytes).saturating_sub(to_u64(subscription.used_bytes))
+        };
         let multiplier = subscription.billing_multiplier;
         if remaining == 0 {
             mark_access_node_dirty_in_tx(&mut tx, line.access_node_id, "traffic_quota_exhausted")

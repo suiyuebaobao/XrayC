@@ -4,7 +4,8 @@
 -->
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import PageHeader from '@/components/PageHeader.vue';
 import AccessEntryDialog from '@/views/access-entries/AccessEntryDialog.vue';
 import {
@@ -38,6 +39,7 @@ import {
 
 type EntryFormMode = 'create' | 'edit';
 
+const route = useRoute();
 const loading = ref(false);
 const saving = ref(false);
 const entryDialogOpen = ref(false);
@@ -127,7 +129,8 @@ const { portError, applyDefaultPort } = useEntryPortDefaults(
   { entryForm, entryMode, entries, exitEndpoints, exitResources },
 );
 
-onMounted(load);
+onMounted(async () => { await load(); if (route.query.action === 'create') openCreateEntryDialog(); });
+watch(() => route.query.entry, (id) => { if (typeof id === 'string' && entries.value.some((entry) => entry.id === id)) selectedEntryId.value = id; });
 
 async function load() {
   loading.value = true;
@@ -144,6 +147,7 @@ async function load() {
     bindings.value = nextBindings;
     exitEndpoints.value = nextExitEndpoints;
     exitResources.value = nextExitResources;
+    if (typeof route.query.entry === 'string' && nextEntries.some((entry) => entry.id === route.query.entry)) selectedEntryId.value = route.query.entry;
     if (!selectedEntryId.value && nextEntries[0]) {
       selectedEntryId.value = nextEntries[0].id;
     }

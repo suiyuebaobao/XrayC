@@ -339,11 +339,12 @@ export const billingApi = {
     return normalizeSubscriptionSettings(data);
   },
 
-  async updateSubscriptionSettings(payload: SubscriptionSettings): Promise<SubscriptionSettings> {
+  async updateSubscriptionSettings(payload: Partial<SubscriptionSettings>): Promise<SubscriptionSettings> {
     const data = await request<unknown>(plannedApiPaths.adminSubscriptionSettings, {
       method: 'PUT',
       body: JSON.stringify(subscriptionSettingsPayload(payload)),
     });
-    return isRecord(data) ? normalizeSubscriptionSettings(data) : payload;
+    if (!isRecord(data)) throw new Error('订阅设置响应格式不正确');
+    return normalizeSubscriptionSettings(data);
   },
 };

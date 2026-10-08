@@ -246,7 +246,7 @@ async fn run_ssh_capture_install(
     Ok(RemoteAccessAgentInstallOutput {
         stdout: redact_text(&stdout, secrets),
         stderr: redact_text(&stderr, secrets),
-        stderr_summary: redact_and_truncate(&stderr, secrets, 1200),
+        stderr_summary: redact_and_truncate(&stderr, secrets, 16_384),
         succeeded: output.status.success(),
     })
 }
@@ -326,13 +326,38 @@ fn common_ssh_options(session: &SshSession) -> Vec<String> {
     ]
 }
 
+/// 独立进程组只包含本次 SSH/SCP 作业，取消或超时不会遗留 sshpass 的子进程。
+struct InstallProcessGroup(Option<u32>);
+impl Drop for InstallProcessGroup {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0 {
+            // 该组由本次 spawn 的 process_group(0) 创建，不匹配或清理其他 SSH 会话。
+            unsafe {
+                libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+            }
+        }
+    }
+}
+
 async fn run_command(
     mut command: Command,
     timeout: Duration,
 ) -> Result<std::process::Output, String> {
-    match tokio::time::timeout(timeout, command.output()).await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(err)) => Err(format!("启动远程安装命令失败: {err}")),
+    use std::os::unix::process::CommandExt;
+    command.as_std_mut().process_group(0);
+    command
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = command
+        .spawn()
+        .map_err(|err| format!("启动远程安装命令失败: {err}"))?;
+    let mut group = InstallProcessGroup(child.id());
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(result) => {
+            group.0 = None;
+            result.map_err(|err| format!("读取远程安装结果失败: {err}"))
+        }
         Err(_) => Err("远程安装命令超时".to_string()),
     }
 }
@@ -350,11 +375,28 @@ fn scp_remote_destination(target: &str, remote_path: &str) -> String {
 }
 
 fn redact_and_truncate(value: &str, secrets: &[String], max_chars: usize) -> String {
-    redact_text(value, secrets)
-        .trim()
-        .chars()
-        .take(max_chars)
-        .collect::<String>()
+    let redacted = redact_text(value, secrets);
+    // 原始 stdout/stderr 仅在内存解析鉴权码；可保存的摘要必须额外遮蔽远端新生成的凭据。
+    let mut parts = redacted.split("xrayc-agent-v1:");
+    let mut safe = parts.next().unwrap_or_default().to_string();
+    for tail in parts {
+        let end = tail.find(char::is_whitespace).unwrap_or(tail.len());
+        safe.push_str("[redacted-auth-code]");
+        safe.push_str(&tail[end..]);
+    }
+    let redacted = safe;
+    let chars: Vec<char> = redacted.trim().chars().collect();
+    if chars.len() <= max_chars {
+        return chars.into_iter().collect();
+    }
+    // 保留末尾真正失败原因，同时保留开头上下文；先脱敏再裁剪。
+    let head = max_chars / 4;
+    let tail = max_chars.saturating_sub(head + 5);
+    format!(
+        "{}\n[…]\n{}",
+        chars[..head].iter().collect::<String>(),
+        chars[chars.len() - tail..].iter().collect::<String>()
+    )
 }
 
 fn redact_text(value: &str, secrets: &[String]) -> String {
@@ -373,6 +415,45 @@ fn _assert_path_is_send_sync(_: &Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_timed_out_install_command_cannot_continue_in_background() {
+        let marker = std::env::temp_dir().join(format!("xrayc-timeout-{}", Uuid::new_v4()));
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 1; printf unexpected > \"$1\"")
+            .arg("test")
+            .arg(&marker);
+        let result = run_command(command, Duration::from_millis(50)).await;
+        assert!(result.is_err());
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let continued = marker.exists();
+        let _ = std::fs::remove_file(marker);
+        assert!(!continued, "超时作业及其子进程不得继续执行");
+    }
+
+    #[test]
+    fn test_saved_summary_redacts_generated_agent_auth_code() {
+        let log = "节点鉴权码：xrayc-agent-v1:fixture-id:new-node-secret\nfinal-message";
+        let summary = redact_and_truncate(log, &[], 16_384);
+        assert!(!summary.contains("new-node-secret"));
+        assert!(summary.contains("[redacted-auth-code]"));
+        assert!(summary.ends_with("final-message"));
+        assert!(redact_text(log, &[]).contains("new-node-secret"));
+    }
+
+    #[test]
+    fn test_remote_error_keeps_final_cause_after_redaction() {
+        let value = format!(
+            "secret-pass{}final-download-failure secret-pass",
+            "package output\n".repeat(300)
+        );
+        let text = redact_and_truncate(&value, &["secret-pass".to_string()], 1200);
+        assert!(text.ends_with("final-download-failure [redacted]"));
+        assert!(!text.contains("secret-pass"));
+        assert!(text.chars().count() <= 1200);
+    }
 
     #[test]
     fn test_remote_bash_login_command_quotes_compound_command() {

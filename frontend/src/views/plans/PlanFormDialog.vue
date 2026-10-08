@@ -37,7 +37,8 @@ const emit = defineEmits<{
           <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
         </el-form-item>
         <el-form-item label="流量额度（GB）">
-          <el-input-number v-model="form.trafficLimitGb" :min="0" :precision="2" :step="10" controls-position="right" />
+          <el-switch :model-value="form.trafficLimitGb === -1" active-text="不限流量" @update:model-value="form.trafficLimitGb = $event ? -1 : 10" />
+          <el-input-number v-if="form.trafficLimitGb !== -1" v-model="form.trafficLimitGb" :min="0" :precision="2" :step="10" controls-position="right" />
         </el-form-item>
         <el-form-item label="上行限速（Mbps，0=不限）">
           <el-input-number v-model="form.rateLimitUpMbps" :min="0" :precision="2" :step="10" controls-position="right" />

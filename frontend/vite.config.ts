@@ -6,7 +6,12 @@ import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), {
+    name: 'xrayc-release-info',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'release.json', source: JSON.stringify({ release_id: process.env.VITE_BUILD_ID || 'development' }) });
+    },
+  }],
   build: {
     chunkSizeWarningLimit: 900,
     rollupOptions: {
@@ -37,8 +42,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:8080',
-      '/sub': 'http://127.0.0.1:8080',
+      '/api': process.env.VITE_UI_PREVIEW === 'true' ? 'http://127.0.0.1:18880' : process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080',
+      '^/sub(?:/|$)': process.env.VITE_UI_PREVIEW === 'true' ? 'http://127.0.0.1:18880' : process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080',
     },
   },
 });

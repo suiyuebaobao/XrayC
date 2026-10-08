@@ -158,8 +158,11 @@ test('管理员可以编辑中转节点、启用本机出口服务并批量删�
   await page.getByRole('option', { name: 'HY2', exact: true }).click();
   // 第 4 行（索引 3）：切到「域名直连（灰云）」，协议选 Trojan。
   await lineRows.nth(3).locator('.el-radio-button').filter({ hasText: '域名直连' }).click();
-  await lineRows.nth(3).locator('.el-form-item').filter({ hasText: '线路协议' }).locator('.el-select').click();
-  await page.getByRole('option', { name: 'Trojan', exact: true }).click();
+  const trojanProtocolSelect = lineRows.nth(3).locator('.el-form-item').filter({ hasText: '线路协议' }).locator('.el-select');
+  await trojanProtocolSelect.click();
+  const trojanDropdownId = await trojanProtocolSelect.getByRole('combobox').getAttribute('aria-controls');
+  // 鎖定本列的選單，避免前一列選單的離場動畫造成重複選項。
+  await page.locator(`[id="${trojanDropdownId}"]`).getByRole('option', { name: 'Trojan', exact: true }).click();
 
   // 四种协议标签都应可见；本机出口不展示 SOCKS5/HTTP（需在 IP 直连下另选），也没有原始 JSON 字段。
   await expect(localExitDialog.getByText('VLESS', { exact: true }).first()).toBeVisible();

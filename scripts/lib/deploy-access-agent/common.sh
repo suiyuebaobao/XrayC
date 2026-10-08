@@ -42,12 +42,11 @@ Optional environment variables:
                                 Remove an existing install dir on failure, default: false.
   XRAYC_DISABLE_LEGACY_SYSTEMD_UNITS  Disable old XrayC systemd units, default: false.
   XRAYC_CLEAN_LEGACY_COMPOSE_PROJECTS
-                                Remove legacy xrayc-access Compose containers when deploying
-                                a differently named project, default: true.
+                                Deprecated. Existing containers and logs are preserved; cross-project cleanup is disabled.
   XRAYC_XRAY_RECLAIM_COMMAND    Command the agent runs after a successful Xray reload to
                                 reclaim stale Xray containers/processes that still hold the
                                 Stats API port via SO_REUSEPORT. Defaults to a docker-socket
-                                script that force-removes non-current xrayc-xray-* containers.
+                                script that only stops non-current Xray containers in this release instance.
   CURL_TIMEOUT                  Curl timeout seconds, default: 120.
 
 This script deploys the remote access node with Docker Compose. It downloads

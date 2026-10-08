@@ -1,0 +1,3141 @@
+openapi: 3.0.3
+info:
+  title: XrayC V2 Control Plane API
+  version: 0.2.0
+  description: >
+    XrayC V2 exposes public plan and subscription APIs, JWT user/admin APIs,
+    and access-agent control plane APIs. This file is a compact route index,
+    not a complete client-generation OpenAPI spec. Detailed request and
+    response contracts are maintained in 接口草案.md.
+tags:
+  - name: public
+  - name: auth
+  - name: user
+  - name: client
+  - name: admin
+  - name: access-agent
+  - name: payment
+paths:
+  /health:
+    get:
+      tags: [public]
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy.
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Register with email, captcha, optional invite code, and optional email code
+      responses:
+        "200":
+          description: User registered and tokens issued.
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Login with account, password, and configured captcha scene
+      responses:
+        "200":
+          description: Access token and HttpOnly refresh cookie issued.
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate refresh token and issue a new access token
+      responses:
+        "200":
+          description: Token refreshed.
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke current refresh token
+      responses:
+        "200":
+          description: Logged out.
+  /api/plans:
+    get:
+      tags: [public]
+      summary: Public enabled plans
+      responses:
+        "200":
+          description: Enabled non-deleted plans.
+  /api/sales-landing:
+    get:
+      tags: [public]
+      summary: Public sales landing page settings
+      responses:
+        "200":
+          description: Sales landing hero, features, scenarios, and FAQ.
+  /sub/{token}:
+    get:
+      tags: [public]
+      summary: Clash/mihomo subscription
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: YAML subscription containing access lines only.
+  /api/deploy/artifacts/{artifact_name}:
+    get:
+      tags: [access-agent]
+      summary: Download a local deploy artifact for access-node bootstrap
+      security:
+        - deployArtifactBearer: []
+      parameters:
+        - name: artifact_name
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._-]+$"
+      responses:
+        "200":
+          description: Binary artifact from the configured deploy artifact directory.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Deploy artifact bearer token is missing or invalid.
+        "404":
+          description: Artifact does not exist.
+  /api/auth/security:
+    get:
+      tags: [auth]
+      summary: Public authentication security settings
+      responses:
+        "200":
+          description: Frontend-visible auth security settings without SMTP secrets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicAuthSecurityEnvelope"
+  /api/auth/captcha:
+    get:
+      tags: [auth]
+      summary: Create an arithmetic captcha challenge for an enabled auth scene
+      parameters:
+        - name: scene
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [register, user_login, admin_login]
+        - name: target
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: One-time captcha challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptchaChallengeEnvelope"
+  /api/auth/email-code:
+    post:
+      tags: [auth]
+      summary: Send a registration email verification code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailCodeRequest"
+      responses:
+        "200":
+          description: Email verification challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailCodeChallengeEnvelope"
+  /api/user/subscription:
+    get:
+      tags: [user]
+      summary: Current user subscription, subscription entries, and quota state
+      responses:
+        "200":
+          description: User subscription state.
+  /api/user/me:
+    get:
+      tags: [user]
+      summary: Current user profile
+      security:
+        - userBearer: []
+      responses:
+        "200":
+          description: Current user profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileEnvelope"
+  /api/user/subscription/token/reset:
+    post:
+      tags: [user]
+      summary: Reset current user's subscription token and invalidate the old link
+      responses:
+        "200":
+          description: New subscription token and URL.
+  /api/user/usage:
+    get:
+      tags: [user]
+      summary: Current user usage summary
+      responses:
+        "200":
+          description: Billed usage summary.
+  /api/user/password/send-code:
+    post:
+      tags: [user]
+      summary: Send an email verification code to the logged-in user's registered email for password change
+      security:
+        - userBearer: []
+      responses:
+        "200":
+          description: Change-password email challenge created. Email is taken from the JWT identity, never from the request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailCodeChallengeEnvelope"
+        "429":
+          description: Email code requested too frequently (cooldown not elapsed).
+  /api/user/password:
+    post:
+      tags: [user]
+      summary: Change the logged-in user's password via email verification code
+      security:
+        - userBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password updated; all refresh tokens for the user are revoked and the browser refresh cookie is cleared.
+        "400":
+          description: Invalid or expired email code, or password weaker than the minimum length.
+  /api/user/invite-codes:
+    get:
+      tags: [user]
+      summary: List current user's invite codes
+      responses:
+        "200":
+          description: Invite code list with usage status.
+    post:
+      tags: [user]
+      summary: Generate a user invite code when self-service invite is enabled
+      responses:
+        "201":
+          description: Invite code created.
+  /api/orders:
+    get:
+      tags: [user]
+      summary: List current user's orders
+      responses:
+        "200":
+          description: Current user's orders.
+    post:
+      tags: [user]
+      summary: Create a plan order when payment is enabled
+      responses:
+        "201":
+          description: Order number, amount, currency, payment address, and expiry.
+        "503":
+          description: Payment is currently paused.
+  /api/redeem:
+    post:
+      tags: [user]
+      summary: Redeem a code for subscription activation or renewal
+      responses:
+        "200":
+          description: Redeem code consumed and subscription updated.
+  /api/admin/plans:
+    get:
+      tags: [admin]
+      summary: Admin plan list with line group bindings
+      responses:
+        "200":
+          description: Plans, quotas, multipliers, and authorization bindings.
+    post:
+      tags: [admin]
+      summary: Create a plan
+      responses:
+        "201":
+          description: Plan created.
+  /api/admin/plans/{planId}:
+    patch:
+      tags: [admin]
+      summary: Partially update a plan
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Plan updated.
+    put:
+      tags: [admin]
+      summary: Replace a plan using the same update contract as PATCH
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Plan updated.
+    delete:
+      tags: [admin]
+      summary: Soft-delete a non-default plan
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Plan deleted and active subscribers moved to the default plan.
+  /api/admin/orders:
+    get:
+      tags: [admin]
+      summary: List orders for operations review
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: Exact order status filter, such as pending or paid.
+        - name: user
+          in: query
+          schema:
+            type: string
+          description: User email fuzzy filter.
+        - name: email
+          in: query
+          schema:
+            type: string
+          description: User email fuzzy filter.
+        - name: keyword
+          in: query
+          schema:
+            type: string
+          description: Fuzzy match against user email or order number.
+        - name: order_no
+          in: query
+          schema:
+            type: string
+          description: Order number fuzzy filter.
+      responses:
+        "200":
+          description: Paged orders without exposing user secrets.
+  /api/admin/redeem-codes:
+    get:
+      tags: [admin]
+      summary: List redeem codes with plan names
+      responses:
+        "200":
+          description: Redeem code list.
+    post:
+      tags: [admin]
+      summary: Generate redeem codes for a plan
+      responses:
+        "201":
+          description: Redeem code batch created.
+  /api/admin/auth-security:
+    get:
+      tags: [admin]
+      summary: Read admin authentication security settings
+      security:
+        - adminBearer: []
+      responses:
+        "200":
+          description: Auth security settings with SMTP password masked or omitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuthSecurityEnvelope"
+    put:
+      tags: [admin]
+      summary: Replace admin authentication security settings
+      security:
+        - adminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAuthSecuritySettings"
+      responses:
+        "200":
+          description: Auth security settings saved with sensitive fields redacted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuthSecurityEnvelope"
+  /api/admin/users:
+    get:
+      tags: [admin]
+      summary: List users with plan, subscription, and traffic summaries
+      security:
+        - adminBearer: []
+      responses:
+        "200":
+          description: User list limited for admin operations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUsersEnvelope"
+    post:
+      tags: [admin]
+      summary: Create a user from the admin console
+      security:
+        - adminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserCreateRequest"
+      responses:
+        "200":
+          description: User created with an initial subscription token and plan subscription.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserEnvelope"
+  /api/admin/users/batch-delete:
+    post:
+      tags: [admin]
+      summary: Delete multiple users atomically
+      security:
+        - adminBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUsersBatchDeleteRequest"
+      responses:
+        "200":
+          description: Users deleted in one database transaction.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUsersBatchDeleteEnvelope"
+  /api/admin/users/{userId}:
+    patch:
+      tags: [admin]
+      summary: Update a user's email, disabled flag, admin flag, or current plan
+      security:
+        - adminBearer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserUpdateRequest"
+      responses:
+        "200":
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserEnvelope"
+    delete:
+      tags: [admin]
+      summary: Delete a user and their user-owned runtime records
+      security:
+        - adminBearer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDeleteEnvelope"
+  /api/admin/users/{userId}/subscription:
+    get:
+      tags: [admin]
+      summary: Read a user's subscription state and admin-visible subscription URL
+      security:
+        - adminBearer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User subscription state.
+  /api/admin/users/{userId}/devices:
+    get:
+      tags: [admin]
+      summary: Read a user's admin-only IP observation list
+      description: Merges successful subscription pull source IPs and access-agent node-use IPs. This is observation only and does not create another subscription credential or affect routing, billing, rate limiting, or line selection.
+      security:
+        - adminBearer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        "200":
+          description: User IP observation list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDevicesEnvelope"
+  /api/admin/users/{userId}/subscription-token/reset:
+    post:
+      tags: [admin]
+      summary: Reset a user's subscription token and invalidate the old link
+      security:
+        - adminBearer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: New subscription token and URL.
+  /api/admin/users/{userId}/reset-password:
+    post:
+      tags: [admin]
+      summary: Admin directly sets a new password for a user (no email code; admin auth is the authorization)
+      security:
+        - adminBearer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset; all refresh tokens for the user are revoked. Audited as user.reset_password with the plaintext redacted.
+        "400":
+          description: Password weaker than the minimum length.
+        "401":
+          description: Admin JWT missing or invalid.
+        "403":
+          description: Caller is not an admin.
+        "404":
+          description: Target user does not exist.
+  /api/admin/plans/{planId}/line-groups:
+    put:
+      tags: [admin]
+      summary: Replace plan line group authorization
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Authorization updated.
+  /api/admin/access-nodes:
+    get:
+      tags: [admin]
+      summary: List transit nodes
+      responses:
+        "200":
+          description: Transit nodes and access-agent state.
+    post:
+      tags: [admin]
+      summary: Create a transit node
+      responses:
+        "201":
+          description: Transit node created from the agent auth code printed by the server-side install script.
+  /api/admin/access-nodes/install-guide:
+    post:
+      tags: [admin]
+      summary: Generate Agent install instructions for a transit node
+      description: >
+        Generates environment variables and a server-side command for
+        installing access-agent. The control plane does not accept SSH
+        credentials, does not connect to the server, and does not execute
+        remote commands.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessNodeInstallGuideRequest"
+      responses:
+        "200":
+          description: Install guide generated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessNodeInstallGuideResponse"
+  /api/admin/access-routing:
+    get:
+      tags: [admin]
+      summary: Read access control-plane routing state
+      responses:
+        "200":
+          description: Transit nodes, line bindings, internal diagnostic runtime data, and authorization groups used by the admin routing page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessRoutingEnvelope"
+  /api/admin/access-lines:
+    get:
+      tags: [admin]
+      summary: List subscription transit entries
+      responses:
+        "200":
+          description: Transit ingresses created by binding access entries to concrete exit-management endpoints.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessLinesEnvelope"
+  /api/admin/access-lines/{id}/metrics:
+    get:
+      tags: [admin]
+      summary: Read recent transit ingress runtime metrics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >
+            Latest metric snapshots plus ledger_summary and ledger_windows for
+            recent transit-ingress traffic ledger windows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessLineMetricsEnvelope"
+  /api/admin/access-lines/{id}/sessions:
+    get:
+      tags: [admin]
+      summary: Read recent transit ingress sessions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >
+            Recent sessions with client_ip_hash, active_connection_count, and
+            status. Plain client IPs are never returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessLineSessionsEnvelope"
+  /api/admin/access-nodes/{accessNodeId}/local-exit-lines:
+    post:
+      tags: [admin]
+      summary: Create node-local exit lines for a transit node
+      description: >
+        Main flow for the simplified node-local exit service. Creates one or
+        more reusable self-hosted exit-management endpoints owned by the transit
+        node. Supported endpoint protocols include VLESS, HY2, Shadowsocks,
+        Trojan, SOCKS, and HTTP. It does not create subscription access entries,
+        subscription entries, or line group bindings.
+      parameters:
+        - name: accessNodeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLocalExitLinesRequest"
+      responses:
+        "200":
+          description: Created node-local exit-management endpoints.
+        "400":
+          description: Invalid node, protocol, network mode, host, port, or protocol settings.
+  /api/admin/access-entries:
+    get:
+      tags: [admin]
+      summary: List access entries
+      description: >
+        Lists user-facing ingress entries created on transit nodes. Entries are
+        bound to exit endpoints through access-entry exit bindings; transit
+        nodes do not expose a direct line-binding API.
+      responses:
+        "200":
+          description: Access entries.
+    post:
+      tags: [admin]
+      summary: Create an access entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessEntryRequest"
+      responses:
+        "201":
+          description: Access entry created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCreatedIdEnvelope"
+  /api/admin/access-entries/{accessEntryId}:
+    put:
+      tags: [admin]
+      summary: Update an access entry
+      parameters:
+        - name: accessEntryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessEntryRequest"
+      responses:
+        "200":
+          description: Access entry updated.
+    delete:
+      tags: [admin]
+      summary: Delete an access entry
+      parameters:
+        - name: accessEntryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Access entry deleted.
+  /api/admin/access-entries/{accessEntryId}/exit-bindings:
+    post:
+      tags: [admin]
+      summary: Bind an access entry to an exit endpoint
+      parameters:
+        - name: accessEntryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessEntryExitBindingRequest"
+      responses:
+        "201":
+          description: Access-entry exit binding node created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCreatedIdEnvelope"
+  /api/admin/access-entry-exit-bindings:
+    get:
+      tags: [admin]
+      summary: List access-entry exit binding nodes
+      responses:
+        "200":
+          description: Access-entry exit binding nodes.
+  /api/admin/access-entry-exit-bindings/{bindingId}:
+    put:
+      tags: [admin]
+      summary: Update an access-entry exit binding node
+      parameters:
+        - name: bindingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessEntryExitBindingRequest"
+      responses:
+        "200":
+          description: Access-entry exit binding node updated.
+    delete:
+      tags: [admin]
+      summary: Delete an access-entry exit binding node
+      parameters:
+        - name: bindingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Access-entry exit binding node deleted.
+  /api/admin/line-groups:
+    post:
+      tags: [admin]
+      summary: Create an internal transit ingress authorization group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Line group created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCreatedIdEnvelope"
+  /api/admin/line-groups/{lineGroupId}/lines:
+    put:
+      tags: [admin]
+      summary: Replace legacy exit endpoints in a group
+      description: Legacy compatibility endpoint. New group membership should use /api/admin/line-groups/{lineGroupId}/binding-nodes.
+      parameters:
+        - name: lineGroupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - exit_endpoint_ids
+              properties:
+                exit_endpoint_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Legacy group endpoint membership replaced.
+  /api/admin/line-groups/{lineGroupId}/binding-nodes:
+    put:
+      tags: [admin]
+      summary: Replace access-entry exit binding nodes in a group
+      parameters:
+        - name: lineGroupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - binding_node_ids
+              properties:
+                binding_node_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Group binding-node membership replaced.
+  /api/admin/exit-resources:
+    get:
+      tags: [admin]
+      summary: List internal exit resources
+      responses:
+        "200":
+          description: Exit resources for authorized admin operations; public, user, and subscription APIs must omit exit secrets.
+    post:
+      tags: [admin]
+      summary: Create an internal exit resource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminExitResourceCreateRequest"
+      responses:
+        "201":
+          description: Exit resource created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCreatedIdEnvelope"
+  /api/admin/exit-resources/{id}:
+    put:
+      tags: [admin]
+      summary: Update an internal exit resource
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminExitResourceUpdateRequest"
+      responses:
+        "200":
+          description: Exit resource updated.
+  /api/admin/exit-endpoints:
+    get:
+      tags: [admin]
+      summary: List internal exit protocol endpoints
+      responses:
+        "200":
+          description: Endpoint summaries include stored upstream fields for authorized admins; public outputs must omit them.
+    post:
+      tags: [admin]
+      summary: Create an internal exit protocol endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminExitEndpointCreateRequest"
+      responses:
+        "201":
+          description: Internal exit endpoint created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCreatedIdEnvelope"
+  /api/admin/exit-endpoints/{id}:
+    put:
+      tags: [admin]
+      summary: Update an internal exit protocol endpoint
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminExitEndpointUpdateRequest"
+      responses:
+        "200":
+          description: Internal exit endpoint updated.
+    delete:
+      tags: [admin]
+      summary: Delete an internal exit protocol endpoint
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Endpoint deleted; related line bindings, unusable access entries, subscription visibility, and dirty access-node state are reconciled.
+  /api/admin/exit-endpoints/{id}/probe:
+    post:
+      tags: [admin]
+      summary: Queue a manual internal exit endpoint probe
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Probe request queued for access nodes using this endpoint or the self-hosted owner node; heartbeat tasks include a redacted target when needed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminExitEndpointProbeEnvelope"
+  /api/admin/exit-pools:
+    get:
+      tags: [admin]
+      summary: List internal diagnostic runtime sets and member health
+      responses:
+        "200":
+          description: Internal diagnostic runtime sets, members, weights, and user assignment counts. Not a public product binding surface.
+  /api/admin/subscription-settings:
+    get:
+      tags: [admin]
+      summary: Read subscription YAML template settings
+      responses:
+        "200":
+          description: Subscription profile, groups, rules, and metadata settings.
+    put:
+      tags: [admin]
+      summary: Update subscription YAML template settings
+      responses:
+        "200":
+          description: Settings saved.
+  /api/admin/sales-landing:
+    get:
+      tags: [admin]
+      summary: Read sales landing page settings
+      responses:
+        "200":
+          description: Sales landing configuration.
+    put:
+      tags: [admin]
+      summary: Update sales landing page settings
+      responses:
+        "200":
+          description: Sales landing configuration saved.
+  /api/admin/field-encryption/status:
+    get:
+      tags: [admin]
+      summary: Inspect field encryption status and latest rotation job
+      responses:
+        "200":
+          description: Keyring status, sealed field counters, and latest redacted rotation job.
+  /api/admin/field-encryption/rotate:
+    post:
+      tags: [admin]
+      summary: Dry-run or execute field encryption key rotation
+      responses:
+        "200":
+          description: Redacted rotation job id, status, counters, and primary kid.
+  /api/admin/audit-logs:
+    get:
+      tags: [admin]
+      summary: List recent admin audit logs
+      responses:
+        "200":
+          description: Audit logs with actor, action, target, IP hash, and timestamp.
+  /api/admin/access-operations/summary:
+    get:
+      tags: [admin]
+      summary: Access operations health summary
+      responses:
+        "200":
+          description: >
+            Monitoring center (merged operations center + health check) summary. Health, runtime, traffic_health day/week/month/total windows from retained usage_ledgers plus usage_daily_rollups, hourly peaks from usage_hourly_rollups, node traffic chart, exit endpoint traffic chart, line group traffic chart, sessions, and probe summary. Each node read model now also carries access_nodes[].runtime_metrics (latest CPU/memory/disk usage sampled from the agent heartbeat); when an old agent does not report node_metrics, runtime_metrics is null and the UI shows "not reported".
+  /api/admin/access-operations/platform-metrics:
+    get:
+      tags: [admin]
+      summary: Control-plane platform resource metrics
+      description: >
+        Monitoring center platform overview. Reads the control-plane host (the
+        server running api/worker/postgres) CPU and memory from the api
+        container's own /proc (which reflects the host without an explicit
+        mount), host disk from statvfs on /hostfs (requires compose to bind /
+        as /:/hostfs:ro), and database storage from pg_database_size plus
+        per-table pg_total_relation_size. All values are numeric bytes or
+        per-mille percentages; no hostnames, paths, rows, or credentials are
+        returned. When /hostfs is not mounted, /proc is unreadable, or
+        pg_database_size is unavailable, the affected fields degrade gracefully
+        (disk.host_mounted=false / empty values) and the endpoint still returns
+        200 so the page is not blocked. New endpoint; backward compatible.
+      responses:
+        "200":
+          description: Control-plane CPU, memory, host disk, and database storage metrics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessOperationsPlatformMetrics"
+  /api/admin/access-operations/ledger-ranking:
+    get:
+      tags: [admin]
+      summary: Access-line traffic ledger ranking
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        "200":
+          description: Usage ledger ranking grouped by access_line_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessOperationsLedgerRankingEnvelope"
+  /api/admin/access-operations/settings:
+    get:
+      tags: [admin]
+      summary: Read access operations settings
+      responses:
+        "200":
+          description: Access operations probe policy, traffic log retention, and database backup settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessOperationsSettingsEnvelope"
+    put:
+      tags: [admin]
+      summary: Update access operations settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessOperationsSettings"
+      responses:
+        "200":
+          description: Access operations probe policy, traffic log retention, and database backup settings saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccessOperationsSettingsEnvelope"
+  /api/admin/access-operations/probe:
+    post:
+      tags: [admin]
+      summary: Queue a manual access operations exit probe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccessOperationsProbeRequest"
+      responses:
+        "200":
+          description: Probe request queued for access nodes using this endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminExitEndpointProbeEnvelope"
+  /api/agent/access/heartbeat:
+    post:
+      tags: [access-agent]
+      summary: access-agent heartbeat and config pull
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessAgentHeartbeatRequest"
+      responses:
+        "200":
+          description: Authorized users, config status, config, and probe tasks.
+  /api/agent/access/config-result:
+    post:
+      tags: [access-agent]
+      summary: Report access-agent config apply result
+      responses:
+        "200":
+          description: Config result accepted.
+  /api/agent/access/traffic:
+    post:
+      tags: [access-agent]
+      summary: Report cumulative user traffic snapshots
+      responses:
+        "200":
+          description: Snapshot batch accepted and billed by delta.
+  /api/agent/access/metrics:
+    post:
+      tags: [access-agent]
+      summary: Report access line runtime metrics
+      responses:
+        "200":
+          description: Metrics accepted.
+  /api/agent/access/sessions:
+    post:
+      tags: [access-agent]
+      summary: Report online sessions with sha256 client IP hashes
+      responses:
+        "200":
+          description: Session snapshot accepted.
+  /api/agent/access/probes:
+    post:
+      tags: [access-agent]
+      summary: Report line and exit endpoint probe results
+      responses:
+        "200":
+          description: Probe snapshot accepted. HY2/Hysteria2 line and exit probes are UDP reachability probes; TCP is only for TCP-class protocols; explicit UDP connection refused is reported as unhealthy.
+  /api/payment/callback:
+    post:
+      tags: [payment]
+      summary: Signed payment callback when payment is enabled
+      responses:
+        "200":
+          description: Payment callback accepted idempotently.
+        "503":
+          description: Payment is currently paused.
+components:
+  securitySchemes:
+    userBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: User JWT access token.
+    adminBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Admin JWT access token with an administrator claim.
+    accessAgentBearer:
+      type: http
+      scheme: bearer
+      description: access-agent bearer token.
+    deployArtifactBearer:
+      type: http
+      scheme: bearer
+      description: Deploy artifact bearer token from server configuration.
+  schemas:
+    PublicAuthSecurityEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/PublicAuthSecuritySettings"
+    PublicAuthSecuritySettings:
+      type: object
+      properties:
+        require_invite_code:
+          type: boolean
+        allow_user_invite_generation:
+          type: boolean
+        max_invite_codes_per_user:
+          type: integer
+          minimum: 0
+        captcha_enabled:
+          type: boolean
+          description: Compatibility flag derived from scene-specific captcha settings.
+        email_verification_enabled:
+          type: boolean
+          description: Compatibility flag derived from email_verification.enabled.
+        invite_required:
+          type: boolean
+          description: Compatibility alias of require_invite_code.
+        login_lock_enabled:
+          type: boolean
+          description: Compatibility flag derived from login_guard.enabled.
+        login_failure_threshold:
+          type: integer
+          minimum: 0
+          description: Compatibility alias of login_guard.failure_threshold.
+        login_lock_minutes:
+          type: integer
+          minimum: 0
+          description: Compatibility alias of login_guard.lock_minutes.
+        captcha:
+          $ref: "#/components/schemas/AuthCaptchaSettings"
+        email_verification:
+          $ref: "#/components/schemas/PublicEmailVerificationSettings"
+        login_guard:
+          $ref: "#/components/schemas/AuthLoginGuardSettings"
+    AdminAuthSecurityEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminAuthSecuritySettings"
+    AdminAuthSecuritySettings:
+      allOf:
+        - $ref: "#/components/schemas/PublicAuthSecuritySettings"
+        - type: object
+          properties:
+            email_verification:
+              $ref: "#/components/schemas/AdminEmailVerificationSettings"
+    AuthCaptchaSettings:
+      type: object
+      properties:
+        register_enabled:
+          type: boolean
+        user_login_enabled:
+          type: boolean
+        admin_login_enabled:
+          type: boolean
+        ttl_seconds:
+          type: integer
+          minimum: 1
+    PublicEmailVerificationSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        allowed_domains:
+          type: array
+          items:
+            type: string
+        cooldown_seconds:
+          type: integer
+          minimum: 0
+    AdminEmailVerificationSettings:
+      allOf:
+        - $ref: "#/components/schemas/PublicEmailVerificationSettings"
+        - type: object
+          properties:
+            smtp_host:
+              type: string
+              description: Admin-only SMTP host setting; omitted from public auth security.
+            smtp_port:
+              type: integer
+              minimum: 1
+              maximum: 65535
+            smtp_username:
+              type: string
+              description: Admin-only SMTP username; omitted from public auth security.
+            smtp_from:
+              type: string
+            smtp_password:
+              type: string
+              writeOnly: true
+              description: Write-only SMTP password input; read responses must mask or omit it.
+    AuthLoginGuardSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        failure_threshold:
+          type: integer
+          minimum: 0
+        lock_minutes:
+          type: integer
+          minimum: 0
+    CaptchaChallengeEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/CaptchaChallenge"
+    CaptchaChallenge:
+      type: object
+      required:
+        - id
+        - scene
+        - question
+        - expires_in
+      properties:
+        id:
+          type: string
+          format: uuid
+        scene:
+          type: string
+          enum: [register, user_login, admin_login]
+        question:
+          type: string
+        expires_in:
+          type: integer
+          minimum: 1
+    EmailCodeRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+    ChangePasswordRequest:
+      type: object
+      required:
+        - new_password
+      properties:
+        email_code_id:
+          type: string
+          format: uuid
+          description: Challenge id returned by /api/user/password/send-code.
+        email_code:
+          type: string
+          description: 6-digit one-time email verification code.
+        new_password:
+          type: string
+          minLength: 8
+          description: New password; minimum length 8. Never logged.
+    AdminResetPasswordRequest:
+      type: object
+      required:
+        - new_password
+      properties:
+        new_password:
+          type: string
+          minLength: 8
+          description: New password set by the admin; minimum length 8. No email code required. Never logged or echoed.
+    EmailCodeChallengeEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/EmailCodeChallenge"
+    EmailCodeChallenge:
+      type: object
+      required:
+        - id
+        - expires_in
+        - cooldown_seconds
+      properties:
+        id:
+          type: string
+          format: uuid
+        expires_in:
+          type: integer
+          minimum: 1
+        cooldown_seconds:
+          type: integer
+          minimum: 0
+    UserProfileEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/UserProfile"
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        account:
+          type: string
+        name:
+          type: string
+        disabled:
+          type: boolean
+        is_admin:
+          type: boolean
+        status:
+          type: string
+          enum: [active, disabled]
+        role:
+          type: string
+          enum: [admin, user]
+        created_at:
+          type: string
+          format: date-time
+    AdminUsersEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminUserSummary"
+    AdminUserEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminUserSummary"
+    AdminUserSummary:
+      allOf:
+        - $ref: "#/components/schemas/UserProfile"
+        - type: object
+          properties:
+            plan_id:
+              type: string
+              format: uuid
+              nullable: true
+            plan_name:
+              type: string
+            subscription_status:
+              type: string
+            subscription_active:
+              type: boolean
+            subscription_expires_at:
+              type: string
+              format: date-time
+              nullable: true
+            expires_at:
+              type: string
+              format: date-time
+              nullable: true
+            traffic_gb:
+              $ref: "#/components/schemas/AdminUserTrafficSummary"
+            remaining_bytes:
+              type: integer
+              minimum: 0
+            remaining_gb:
+              type: number
+              minimum: 0
+    AdminUserTrafficSummary:
+      type: object
+      properties:
+        used_gb:
+          type: number
+          minimum: 0
+        total_gb:
+          type: number
+          minimum: 0
+    AdminUserDevicesEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - items
+            - total
+            - page
+            - page_size
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminUserDeviceIp"
+            total:
+              type: integer
+              minimum: 0
+            page:
+              type: integer
+              minimum: 1
+            page_size:
+              type: integer
+              minimum: 1
+    AdminUserDeviceIp:
+      type: object
+      properties:
+        client_ip:
+          type: string
+          nullable: true
+          description: Admin-only source IP when available.
+        client_ip_hash:
+          type: string
+          nullable: true
+        source:
+          type: string
+          enum: [subscription_pull, node_use, both, unknown]
+        first_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        subscription_pull_count:
+          type: integer
+          minimum: 0
+        node_use_count:
+          type: integer
+          minimum: 0
+        last_access_line:
+          $ref: "#/components/schemas/AdminUserDeviceAccessLine"
+        last_access_node:
+          $ref: "#/components/schemas/AdminUserDeviceAccessNode"
+        last_session_status:
+          type: string
+          nullable: true
+        last_active_connection_count:
+          type: integer
+          minimum: 0
+          nullable: true
+    AdminUserDeviceAccessLine:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        inbound_protocol:
+          type: string
+        client_network:
+          type: string
+    AdminUserDeviceAccessNode:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        host:
+          type: string
+          nullable: true
+    AdminUserUpdateRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        disabled:
+          type: boolean
+        is_admin:
+          type: boolean
+        plan_id:
+          type: string
+          format: uuid
+    AdminUserCreateRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        disabled:
+          type: boolean
+          default: false
+        is_admin:
+          type: boolean
+          default: false
+        plan_id:
+          type: string
+          format: uuid
+          nullable: true
+    AdminUsersBatchDeleteRequest:
+      type: object
+      required:
+        - user_ids
+      properties:
+        user_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+    AdminUsersBatchDeleteEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - deleted_count
+            - items
+          properties:
+            deleted_count:
+              type: integer
+              minimum: 0
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminUserDeleteResult"
+    AdminUserDeleteEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminUserDeleteResult"
+    AdminUserDeleteResult:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        deleted_usage_ledger_count:
+          type: integer
+          minimum: 0
+        deleted_snapshot_count:
+          type: integer
+          minimum: 0
+    AdminCreatedIdEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+    AdminCountEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - count
+          properties:
+            count:
+              type: integer
+              minimum: 0
+    AdminExitResourceCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        region_code:
+          type: string
+          default: ""
+        provider_name:
+          type: string
+          default: ""
+        ownership:
+          type: string
+          default: third_party
+          description: Legacy ownership values are read-only; node-local exit services are created by the transit-node local exit service API, whose frontend defaults to explicit VLESS, HY2, Shadowsocks, or Trojan self-hosted endpoints.
+        enabled:
+          type: boolean
+          default: true
+    AdminExitResourceUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        region_code:
+          type: string
+        provider_name:
+          type: string
+        ownership:
+          type: string
+          description: Legacy ownership values cannot be set through the generic exit-resource API.
+        enabled:
+          type: boolean
+    AdminExitEndpointCreateRequest:
+      type: object
+      required:
+        - exit_resource_id
+        - outbound_type
+      properties:
+        exit_resource_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          default: ""
+        outbound_type:
+          type: string
+          description: Main-path upstream values are socks, http, vless, trojan, shadowsocks, hysteria, and hy2. Node-local exit services use the same explicit protocol set.
+        host:
+          type: string
+          default: ""
+          description: Required for ordinary upstream endpoints; never use real hosts in examples.
+        port:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          default: 0
+        outbound_config:
+          type: object
+          additionalProperties: true
+          default: {}
+          writeOnly: true
+          description: Stored and returned by authorized admin read APIs; omitted from public, user, subscription APIs and public logs.
+        stream_config:
+          type: object
+          additionalProperties: true
+          default: {}
+          writeOnly: true
+        probe_config:
+          type: object
+          additionalProperties: true
+          default: {}
+          writeOnly: true
+        enabled:
+          type: boolean
+          default: true
+    AdminExitEndpointUpdateRequest:
+      type: object
+      properties:
+        exit_resource_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        outbound_type:
+          type: string
+        host:
+          type: string
+          description: Required for ordinary upstream endpoints when the final protocol needs a host.
+        port:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        outbound_config:
+          type: object
+          additionalProperties: true
+          writeOnly: true
+          description: Replaces stored outbound config when present.
+        stream_config:
+          type: object
+          additionalProperties: true
+          writeOnly: true
+        probe_config:
+          type: object
+          additionalProperties: true
+          writeOnly: true
+        enabled:
+          type: boolean
+    AdminExitEndpointProbeEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - exit_endpoint_id
+            - queued_access_nodes
+          properties:
+            exit_endpoint_id:
+              type: string
+              format: uuid
+            queued_access_nodes:
+              type: array
+              items:
+                type: string
+                format: uuid
+    AdminAccessOperationsProbeRequest:
+      type: object
+      required:
+        - exit_endpoint_id
+      properties:
+        exit_endpoint_id:
+          type: string
+          format: uuid
+    AdminAccessOperationsSettings:
+      type: object
+      properties:
+        probe_policy:
+          type: object
+          properties:
+            exit_auto_failover_enabled:
+              type: boolean
+              default: true
+            exit_failure_threshold:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 3
+            exit_recovery_threshold:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 2
+            exit_window_minutes:
+              type: integer
+              minimum: 1
+              maximum: 120
+              default: 10
+            exit_probe_interval_seconds:
+              type: integer
+              minimum: 30
+              maximum: 86400
+              default: 300
+              description: Worker 自动排队 access_node 到 exit_endpoint 组合探测的最小间隔。
+            probe_queue_batch_size:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              default: 100
+              description: Worker 每轮最多写入的 queued 探测任务数量。
+            max_pending_probe_tasks:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              default: 5
+              description: 单轮调度允许保留的未完成 queued 探测任务上限。
+        traffic_log_retention:
+          type: object
+          properties:
+            detail_retention_days:
+              type: integer
+              minimum: 1
+              maximum: 3650
+              default: 14
+              description: 管理员用户级详细流量日志保留天数；超过后 Worker 先汇总到 usage_daily_rollups 和 usage_hourly_rollups 再删除明细。
+            prune_enabled:
+              type: boolean
+              default: true
+              description: 是否启用详细 usage_ledgers 过期汇总清理。
+            delete_batch_size:
+              type: integer
+              minimum: 100
+              maximum: 100000
+              default: 5000
+              description: Worker 每轮最多汇总并删除的过期明细行数。
+        database_backup:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              default: true
+              description: 是否启用 Worker 自动 PostgreSQL 备份。
+            interval_days:
+              type: integer
+              minimum: 1
+              maximum: 30
+              default: 1
+              description: 自动备份间隔天数，默认每天一次。
+            retention_days:
+              type: integer
+              minimum: 1
+              maximum: 3650
+              default: 30
+              description: 备份文件保留天数，超过后由 Worker 清理备份目录内的 XrayC PostgreSQL dump。
+    AdminAccessOperationsSettingsEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminAccessOperationsSettings"
+    AdminAccessOperationsPlatformMetrics:
+      type: object
+      description: >
+        Monitoring center platform overview. Control-plane host CPU/memory read
+        from the api container /proc (reflects the host without an explicit
+        mount), host disk read from statvfs on /hostfs (compose bind
+        /:/hostfs:ro), and database storage from pg_database_size plus per-table
+        sizes. Percentages are per-mille (0-100000 == 0%-100%). No hostnames,
+        paths, table rows, or credentials are exposed.
+      required:
+        - cpu
+        - memory
+        - disk
+        - database
+      properties:
+        cpu:
+          type: object
+          required: [pct_milli]
+          properties:
+            pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+              description: CPU usage in per-mille (0-100000).
+        memory:
+          type: object
+          required: [used_bytes, total_bytes, used_pct_milli, free_pct_milli]
+          properties:
+            used_bytes:
+              type: integer
+              format: int64
+            total_bytes:
+              type: integer
+              format: int64
+            used_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            free_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+        disk:
+          type: object
+          required:
+            - used_bytes
+            - total_bytes
+            - used_pct_milli
+            - free_pct_milli
+            - host_mounted
+          properties:
+            used_bytes:
+              type: integer
+              format: int64
+              nullable: true
+            total_bytes:
+              type: integer
+              format: int64
+              nullable: true
+            used_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+              nullable: true
+            free_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+              nullable: true
+            host_mounted:
+              type: boolean
+              description: >
+                True when the host root is bind-mounted as /hostfs:ro and disk
+                metrics reflect the host disk. False when /hostfs is not mounted;
+                disk fields then degrade to null and the UI shows "host disk not
+                mounted".
+        database:
+          type: object
+          required: [total_bytes, tables]
+          properties:
+            total_bytes:
+              type: integer
+              format: int64
+              description: pg_database_size(current_database()) in bytes.
+            tables:
+              type: array
+              items:
+                type: object
+                required: [name, bytes]
+                properties:
+                  name:
+                    type: string
+                  bytes:
+                    type: integer
+                    format: int64
+    AccessNodeRuntimeMetrics:
+      type: object
+      description: >
+        Latest CPU/memory/disk usage reported by access-agent in the heartbeat
+        node_metrics field and stored in node_runtime_metrics. Percentages are
+        per-mille (0-100000). Exposed through access_nodes[].runtime_metrics in
+        the operations summary and admin node read model.
+      required:
+        - cpu
+        - memory
+        - disk
+        - observed_at
+        - status
+      properties:
+        cpu:
+          type: object
+          required: [pct_milli]
+          properties:
+            pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+        memory:
+          type: object
+          required: [used_bytes, total_bytes, used_pct_milli, free_pct_milli]
+          properties:
+            used_bytes:
+              type: integer
+              format: int64
+            total_bytes:
+              type: integer
+              format: int64
+            used_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            free_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+        disk:
+          type: object
+          required: [used_bytes, total_bytes, used_pct_milli, free_pct_milli]
+          properties:
+            used_bytes:
+              type: integer
+              format: int64
+            total_bytes:
+              type: integer
+              format: int64
+            used_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            free_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+        observed_at:
+          type: string
+          format: date-time
+          description: Sample time of the latest node runtime metrics row.
+        status:
+          type: string
+          enum: [fresh, stale]
+          description: >
+            fresh when the latest sample is within the freshness window; stale
+            when it is too old. Missing samples are represented by a null
+            runtime_metrics rather than this object.
+    AccessAgentHeartbeatRequest:
+      type: object
+      description: >
+        access-agent heartbeat request. Only fields relevant to monitoring are
+        documented here; node_metrics is optional and backward compatible (old
+        agents omit it).
+      properties:
+        node_id:
+          type: string
+          format: uuid
+        agent_version:
+          type: string
+        kernel_connmark_available:
+          type: boolean
+          nullable: true
+        kernel_upgrade_pending:
+          type: boolean
+          nullable: true
+        node_metrics:
+          nullable: true
+          description: >
+            Optional node runtime metrics sampled by the agent from the node
+            /proc (CPU/memory) and statvfs (disk). Stored in node_runtime_metrics
+            and surfaced as access_nodes[].runtime_metrics. Omitted by old agents;
+            the node then shows "not reported".
+          allOf:
+            - $ref: "#/components/schemas/AccessAgentHeartbeatNodeMetrics"
+    AccessAgentHeartbeatNodeMetrics:
+      type: object
+      required: [cpu, memory, disk]
+      properties:
+        cpu:
+          type: object
+          required: [pct_milli]
+          properties:
+            pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+        memory:
+          type: object
+          required: [used_bytes, total_bytes, used_pct_milli, free_pct_milli]
+          properties:
+            used_bytes:
+              type: integer
+              format: int64
+            total_bytes:
+              type: integer
+              format: int64
+            used_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            free_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+        disk:
+          type: object
+          required: [used_bytes, total_bytes, used_pct_milli, free_pct_milli, mount]
+          properties:
+            used_bytes:
+              type: integer
+              format: int64
+            total_bytes:
+              type: integer
+              format: int64
+            used_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            free_pct_milli:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            mount:
+              type: string
+              description: Mount point the agent sampled (e.g. "/").
+    AdminAccessOperationsLedgerRankingEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - source
+            - limit
+            - generated_at
+            - totals
+            - items
+          properties:
+            source:
+              type: string
+              enum: [usage_ledgers+usage_daily_rollups]
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+            generated_at:
+              type: string
+              format: date-time
+            totals:
+              $ref: "#/components/schemas/AdminAccessOperationsLedgerTotals"
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminAccessOperationsLedgerRankingItem"
+    AdminAccessOperationsLedgerTotals:
+      type: object
+      properties:
+        access_line_count:
+          type: integer
+        ledger_count:
+          type: integer
+        delta_uplink:
+          type: integer
+          format: int64
+        delta_downlink:
+          type: integer
+          format: int64
+        delta_total:
+          type: integer
+          format: int64
+        real_bytes:
+          type: integer
+          format: int64
+        billed_uplink:
+          type: integer
+          format: int64
+        billed_downlink:
+          type: integer
+          format: int64
+        billed_bytes:
+          type: integer
+          format: int64
+        latest_collected_at:
+          type: string
+          format: date-time
+          nullable: true
+    AdminAccessOperationsLedgerRankingItem:
+      allOf:
+        - $ref: "#/components/schemas/AdminAccessOperationsLedgerTotals"
+        - type: object
+          required:
+            - rank
+            - access_line_id
+          properties:
+            rank:
+              type: integer
+            access_line_id:
+              type: string
+              format: uuid
+            access_line_name:
+              type: string
+            access_node_name:
+              type: string
+            region_code:
+              type: string
+            listen_host:
+              type: string
+              description: Host as stored for the access line; public docs must not use real hosts.
+            listen_port:
+              type: integer
+              minimum: 0
+    AdminAccessNodeInstallGuideRequest:
+      type: object
+      properties:
+        access_node_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Existing node id. Omit to create a new transit node.
+        name:
+          type: string
+          nullable: true
+          description: Required when access_node_id is omitted. Alias node_name is accepted.
+        node_name:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Backward-compatible alias of name.
+        public_host:
+          type: string
+          nullable: true
+          description: Required when creating a new access node; use a placeholder in public docs.
+        agent_token:
+          type: string
+          nullable: true
+          writeOnly: true
+          description: Agent auth code printed by deploy-access-agent.sh; required when creating a transit node. Despite the legacy field name, this is not a plaintext token input.
+        control_plane_url:
+          type: string
+          nullable: true
+          description: Public control-plane base URL. Alias panel_url is accepted; may be inferred server-side.
+        panel_url:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Backward-compatible alias of control_plane_url.
+        deploy_artifact_token:
+          type: string
+          nullable: true
+          writeOnly: true
+          description: Artifact download token. May fall back to server DEPLOY_ARTIFACT_TOKEN; never echoed.
+        install_dir:
+          type: string
+          nullable: true
+          writeOnly: true
+          description: Server install directory from a private source; never echo private paths in public reports.
+        compose_project:
+          type: string
+          nullable: true
+          description: Docker Compose project name. Alias compose_project_name is accepted.
+        compose_project_name:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Backward-compatible alias of compose_project.
+        xray_api_server:
+          type: string
+          nullable: true
+        xray_api_listen_host:
+          type: string
+          nullable: true
+        xray_api_listen_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          nullable: true
+          description: Alias xray_api_port is accepted.
+        xray_api_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          nullable: true
+          deprecated: true
+          description: Backward-compatible alias of xray_api_listen_port.
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 1
+          nullable: true
+        traffic_interval_seconds:
+          type: integer
+          minimum: 1
+          nullable: true
+        session_idle_seconds:
+          type: integer
+          minimum: 1
+          nullable: true
+        expected_listen_ports:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 65535
+          default: []
+          description: Empty means no port readiness assertion. Explicit non-empty values are written to the install environment so the server-side script waits for those ports.
+        tls_cert_domains:
+          type: array
+          items:
+            type: string
+          default: []
+        disable_legacy_systemd_units:
+          type: boolean
+          default: false
+        force_reinstall:
+          type: boolean
+          default: false
+    AdminAccessNodeInstallGuideResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminAccessNodeInstallGuideData"
+    AdminAccessNodeInstallGuideData:
+      type: object
+      required:
+        - guide_id
+        - status
+        - access_node_id
+        - access_node_name
+        - environment
+        - environment_text
+        - install_command
+        - steps
+      properties:
+        guide_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ready]
+        summary:
+          type: string
+        access_node_id:
+          type: string
+          format: uuid
+        access_node_name:
+          type: string
+        access_node_created:
+          type: boolean
+        install_dir:
+          type: string
+        compose_project:
+          type: string
+        script_source_hint:
+          type: string
+        environment:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAccessNodeInstallGuideEnv"
+        environment_text:
+          type: string
+        install_command:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAccessNodeInstallGuideStep"
+    AdminAccessNodeInstallGuideEnv:
+      type: object
+      required:
+        - name
+        - value
+        - secret
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        secret:
+          type: boolean
+    AdminAccessNodeInstallGuideStep:
+      type: object
+      required:
+        - title
+        - detail
+      properties:
+        title:
+          type: string
+        detail:
+          type: string
+          description: Redacted summary only.
+        message:
+          type: string
+          description: Redacted install-guide step message. The control plane only generates instructions and does not execute server-side install commands.
+    AdminAccessRoutingEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminAccessRoutingResponse"
+    AdminAccessRoutingResponse:
+      type: object
+      description: >
+        Admin routing compatibility snapshot. Product-facing operations should
+        use access_nodes, access_lines, line_groups, entry bindings, and exit
+        endpoint APIs; exit_pools is an internal runtime compatibility
+        collection, not a visible grouping model.
+      required:
+        - access_nodes
+        - access_lines
+        - exit_pools
+        - line_groups
+      properties:
+        access_nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAccessNodeSummary"
+        access_lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAccessLineSummary"
+        exit_pools:
+          type: array
+          description: >
+            Internal runtime compatibility collections that map access entries
+            to exit endpoints. Do not expose this as a product-level line pool,
+            group, load-balancing, or sticky-session concept.
+          items:
+            $ref: "#/components/schemas/AdminExitPoolSummary"
+        line_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminLineGroupSummary"
+    AdminAccessNodeSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        public_host:
+          type: string
+        config_dirty:
+          type: boolean
+        desired_config_hash:
+          type: string
+          nullable: true
+        applied_config_hash:
+          type: string
+          nullable: true
+        runtime_metrics:
+          nullable: true
+          description: >
+            Monitoring center node runtime metrics. Latest CPU/memory/disk
+            usage sampled from the agent heartbeat node_metrics field and stored
+            in node_runtime_metrics. Null when an old agent never reported or
+            the latest sample is stale; the UI then shows "not reported". Never
+            faked with 0.
+          allOf:
+            - $ref: "#/components/schemas/AccessNodeRuntimeMetrics"
+    AdminAccessLineSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+        region_code:
+          type: string
+        region_name:
+          type: string
+        region_flag:
+          type: string
+        access_node_id:
+          type: string
+          format: uuid
+        access_node_name:
+          type: string
+        listen_host:
+          type: string
+        listen_port:
+          type: integer
+        protocol:
+          type: string
+        status:
+          type: string
+          enum: [enabled, disabled, degraded]
+        exit_pool_id:
+          type: string
+          format: uuid
+        exit_pool_name:
+          type: string
+        online_users:
+          type: integer
+          nullable: true
+        active_connections:
+          type: integer
+          nullable: true
+        unique_client_ips:
+          type: integer
+          nullable: true
+        uplink_rate_bps:
+          type: integer
+          nullable: true
+        downlink_rate_bps:
+          type: integer
+          nullable: true
+        metric_collected_at:
+          type: string
+          format: date-time
+          nullable: true
+        metric_status:
+          type: string
+          enum: [fresh, stale, no_data]
+        latency_ms:
+          type: integer
+          nullable: true
+        probe_status:
+          type: string
+        last_probe_at:
+          type: string
+          format: date-time
+          nullable: true
+        probe_error_summary:
+          type: string
+          nullable: true
+    AdminAccessLinesEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminAccessLineSummary"
+            access_lines:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminAccessLineSummary"
+    AdminAccessLineCreateRequest:
+      type: object
+      deprecated: true
+      description: Deprecated legacy request. New transit entries are created with AdminAccessNodeLineEntriesRequest and exit_endpoint_id.
+      required:
+        - name
+        - access_node_id
+        - exit_endpoint_id
+        - listen_host
+        - listen_port
+        - protocol
+      properties:
+        name:
+          type: string
+        access_node_id:
+          type: string
+          format: uuid
+        exit_endpoint_id:
+          type: string
+          format: uuid
+          description: Concrete exit-management endpoint selected for this binding.
+        listen_host:
+          type: string
+        listen_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        protocol:
+          type: string
+        transport:
+          type: string
+        server_name:
+          type: string
+          nullable: true
+        public_key:
+          type: string
+          nullable: true
+        short_id:
+          type: string
+          nullable: true
+        region_code:
+          type: string
+          nullable: true
+        region_name:
+          type: string
+          nullable: true
+        region_flag:
+          type: string
+          nullable: true
+        flow:
+          type: string
+          nullable: true
+        udp_enabled:
+          type: boolean
+        udp_packet_encoding:
+          type: string
+          enum: ["", xudp]
+        xhttp_path:
+          type: string
+          nullable: true
+        xhttp_host:
+          type: string
+          nullable: true
+        xhttp_mode:
+          type: string
+          nullable: true
+        identity_mode:
+          type: string
+          nullable: true
+        user_key_source:
+          type: string
+          nullable: true
+        inbound_config:
+          type: object
+        visibility_weight:
+          type: integer
+          minimum: 0
+    AdminExitPoolSummary:
+      type: object
+      description: >
+        Internal runtime compatibility collection summary. It exists to
+        preserve current agent/runtime routing state; administrators should
+        manage exits through exit_resources/exit_endpoints and group
+        subscription nodes through line_groups.
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+        region_code:
+          type: string
+        region_name:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, offline]
+        healthy_members:
+          type: integer
+        total_members:
+          type: integer
+        strategy:
+          type: string
+        active_assignments:
+          type: integer
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminExitPoolMemberSummary"
+    AdminExitPoolMemberSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        resource_name:
+          type: string
+        outbound_type:
+          type: string
+          enum: [direct, socks, http, vless, trojan, shadowsocks, hysteria, hy2]
+          description: Legacy compatibility values may appear only on old read-only records; current node-local exit services use explicit VLESS, HY2, Shadowsocks, Trojan, SOCKS, or HTTP endpoints.
+        status:
+          type: string
+          enum: [healthy, degraded, draining, offline, unknown]
+        host:
+          type: string
+          description: Admin summaries may include upstream host for authorized admins; public summaries must omit it.
+        port:
+          type: integer
+          description: Admin summaries may include upstream port for authorized admins; public summaries must omit it.
+        weight:
+          type: integer
+        priority:
+          type: integer
+        allow_new_assignments:
+          type: boolean
+        healthy:
+          type: boolean
+    AdminLocalExitLinesRequest:
+      type: object
+      required:
+        - lines
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/AdminLocalExitLineRequest"
+    AdminLocalExitLineRequest:
+      type: object
+      required:
+        - outbound_type
+        - network_mode
+        - port
+      properties:
+        resource_name:
+          type: string
+        endpoint_name:
+          type: string
+        region_code:
+          type: string
+        outbound_type:
+          type: string
+          enum: [vless, hysteria, hy2, hysteria2, shadowsocks, ss, trojan, socks, socks5, http]
+          description: Line protocol selected by the admin.
+        network_mode:
+          type: string
+          enum: [tcp, udp, xhttp, xudp, ws, grpc]
+          description: Client/network mode for this line. HY2/Hysteria line protocols only allow udp.
+        host:
+          type: string
+          nullable: true
+          description: Optional service address. When omitted, the owning transit node address is used.
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        outbound_config:
+          type: object
+          additionalProperties: true
+        stream_config:
+          type: object
+          additionalProperties: true
+        probe_config:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+          default: true
+    AdminAccessEntryRequest:
+      type: object
+      required:
+        - access_node_id
+        - listen_port
+      properties:
+        access_node_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        listen_host:
+          type: string
+        listen_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        protocol:
+          type: string
+          enum: [vless, trojan, hysteria, hy2, hysteria2, shadowsocks, ss]
+        transport:
+          type: string
+          enum: [tcp, udp, xudp, xhttp, ws, grpc]
+        security:
+          type: string
+          enum: ["", reality, tls]
+        server_name:
+          type: string
+        ws_path:
+          type: string
+        ws_host:
+          type: string
+        cdn_enabled:
+          type: boolean
+        cdn_provider:
+          type: string
+        cdn_hostname:
+          type: string
+        cdn_server:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        sort_weight:
+          type: integer
+    AdminAccessEntryExitBindingRequest:
+      type: object
+      required:
+        - exit_endpoint_id
+      properties:
+        exit_endpoint_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        remark:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        sort_weight:
+          type: integer
+    AdminLineGroupSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        line_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        binding_node_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    AdminAccessLineMetricsEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminAccessLineMetricsResponse"
+    AdminAccessLineMetricsResponse:
+      type: object
+      required:
+        - access_line_id
+        - ledger_summary
+        - ledger_windows
+        - metrics
+      properties:
+        access_line_id:
+          type: string
+          format: uuid
+        ledger_summary:
+          $ref: "#/components/schemas/AdminAccessLineLedgerSummary"
+        traffic_summary:
+          $ref: "#/components/schemas/AdminAccessLineLedgerSummary"
+          description: Backward-compatible alias of ledger_summary.
+        ledger_windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAccessLineLedgerWindow"
+          description: Hourly ledger windows for recent access-line usage.
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAccessLineMetric"
+    AdminAccessLineLedgerSummary:
+      type: object
+      properties:
+        ledger_count:
+          type: integer
+        delta_uplink:
+          type: integer
+        delta_downlink:
+          type: integer
+        delta_total:
+          type: integer
+        real_bytes:
+          type: integer
+        billed_uplink:
+          type: integer
+        billed_downlink:
+          type: integer
+        billed_bytes:
+          type: integer
+    AdminAccessLineLedgerWindow:
+      allOf:
+        - $ref: "#/components/schemas/AdminAccessLineLedgerSummary"
+        - type: object
+          properties:
+            window_start:
+              type: string
+              format: date-time
+    AdminAccessLineMetric:
+      type: object
+      properties:
+        access_line_id:
+          type: string
+          format: uuid
+        access_node_id:
+          type: string
+          format: uuid
+          nullable: true
+        exit_pool_id:
+          type: string
+          format: uuid
+          nullable: true
+        online_users:
+          type: integer
+        active_user_count:
+          type: integer
+        active_connection_count:
+          type: integer
+        active_connections:
+          type: integer
+        unique_client_ips:
+          type: integer
+        unique_client_ip_count:
+          type: integer
+        uplink_rate_bps:
+          type: integer
+        downlink_rate_bps:
+          type: integer
+        observed_at:
+          type: string
+          format: date-time
+        collected_at:
+          type: string
+          format: date-time
+    AdminAccessLineSessionsResponse:
+      type: object
+      required:
+        - access_line_id
+        - sessions
+      properties:
+        access_line_id:
+          type: string
+          format: uuid
+        sessions:
+          type: array
+          items:
+            type: object
+            required:
+              - client_ip_hash
+              - active_connection_count
+              - status
+            properties:
+              client_ip_hash:
+                type: string
+                pattern: "^sha256:[0-9a-fA-F]{64}$"
+              active_connection_count:
+                type: integer
+              active_connections:
+                type: integer
+                description: Backward-compatible alias of active_connection_count.
+              id:
+                type: string
+                format: uuid
+              access_line_id:
+                type: string
+                format: uuid
+              user_id:
+                type: string
+                format: uuid
+                nullable: true
+              email:
+                type: string
+              xray_user_key:
+                type: string
+              started_at:
+                type: string
+                format: date-time
+              last_seen_at:
+                type: string
+                format: date-time
+              status:
+                type: string
+                enum: [online, offline, expired, unknown]
+    AdminAccessLineSessionsEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AdminAccessLineSessionsResponse"

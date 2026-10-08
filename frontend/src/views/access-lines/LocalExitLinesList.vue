@@ -6,7 +6,8 @@
 -->
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import ExitEndpointEditorDialog from '@/views/shared/ExitEndpointEditorDialog.vue';
 import { apiClient } from '@/services/api';
 import type { LocalExitLineSummary } from '@/services/api';
 import type { RelayNodeView } from '@/views/access-lines/types';
@@ -26,17 +27,6 @@ const saving = ref(false);
 const lines = ref<LocalExitLineSummary[]>([]);
 const editDialogOpen = ref(false);
 const editingEndpointId = ref('');
-
-// 就地编辑表单：只改端口、选用域名、启用状态。
-const editForm = reactive({
-  endpointName: '',
-  port: 1443,
-  nodeDomainId: '',
-  enabled: true,
-});
-
-// 节点的可选域名清单（编辑时下拉）；留空=免证书。
-const nodeDomainOptions = ref<RelayNodeView['domains']>([]);
 
 // 本机出口的「实际出网 IP」= 所属中转节点的公网 IP（优先 ip_direct_address，无则 public_host）。
 // 本机出口的 host（127.0.0.1 回环）只是节点上那个回环 SOCKS5/出口服务的内部连接地址，
@@ -74,7 +64,6 @@ function loopbackServiceText(line: LocalExitLineSummary) {
 watch(
   () => [props.active, props.node?.id ?? ''] as const,
   ([active]) => {
-    nodeDomainOptions.value = props.node?.domains ?? [];
     if (active && props.node) {
       void loadLines();
     } else {
@@ -119,40 +108,11 @@ function lineDomainText(line: LocalExitLineSummary) {
 
 function openEdit(line: LocalExitLineSummary) {
   editingEndpointId.value = line.exitEndpointId;
-  editForm.endpointName = line.endpointName;
-  editForm.port = line.port || 1443;
-  editForm.nodeDomainId = line.nodeDomainId;
-  editForm.enabled = line.enabled;
   editDialogOpen.value = true;
 }
-
-async function submitEdit() {
-  const node = props.node;
-  if (!node) {
-    return;
-  }
-  const port = Number(editForm.port);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    ElMessage.warning('端口必须在 1-65535 之间');
-    return;
-  }
-  saving.value = true;
-  try {
-    await apiClient.updateLocalExitLine(node.id, editingEndpointId.value, {
-      endpoint_name: editForm.endpointName.trim() || undefined,
-      port,
-      node_domain_id: editForm.nodeDomainId.trim() || null,
-      enabled: editForm.enabled,
-    });
-    editDialogOpen.value = false;
-    await loadLines();
-    emit('changed');
-    ElMessage.success('本机出口线路已更新');
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '更新本机出口线路失败');
-  } finally {
-    saving.value = false;
-  }
+async function edited() {
+  await loadLines();
+  emit('changed');
 }
 
 async function removeLine(line: LocalExitLineSummary) {
@@ -235,38 +195,7 @@ async function removeLine(line: LocalExitLineSummary) {
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="editDialogOpen" title="编辑本机出口线路" width="560px" append-to-body>
-      <el-form label-position="top">
-        <el-form-item label="协议档名称">
-          <el-input v-model="editForm.endpointName" placeholder="为空保留原名" />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="editForm.port" :min="1" :max="65535" class="edit-field" />
-        </el-form-item>
-        <el-form-item label="选用域名">
-          <el-select
-            v-model="editForm.nodeDomainId"
-            clearable
-            class="edit-field"
-            placeholder="留空=免证书"
-          >
-            <el-option
-              v-for="domain in nodeDomainOptions"
-              :key="domain.id"
-              :label="nodeDomainLabel(domain)"
-              :value="domain.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-switch v-model="editForm.enabled" active-text="启用" inactive-text="停用" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button>
-      </template>
-    </el-dialog>
+    <ExitEndpointEditorDialog v-model="editDialogOpen" :endpoint-id="editingEndpointId" :node="node" @changed="edited" />
   </div>
 </template>
 

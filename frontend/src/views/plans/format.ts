@@ -50,6 +50,7 @@ export function formFromPlan(plan: PlanInfo): PlanFormDraft {
 }
 
 export function formatGb(value: number) {
+  if (value === -1) return '不限流量';
   if (!Number.isFinite(value)) {
     return '0 GB';
   }

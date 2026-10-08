@@ -123,8 +123,19 @@ export async function waitForApiResponse(
 ) {
   const method = options.method ?? 'GET';
   const response = await page.waitForResponse(
-    (candidate) => apiPathname(candidate) === path
-      && candidate.request().method() === method,
+    async (candidate) => {
+      if (apiPathname(candidate) !== path || candidate.request().method() !== method) {
+        return false;
+      }
+      // 導覽時舊頁面的輪詢可能已收到標頭、卻被取消而沒有本文。
+      // 等待可讀取的完整回應，避免把空資料誤判成後端缺少欄位。
+      try {
+        await candidate.body();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     { timeout: options.timeout ?? 15_000 },
   );
   expect(response.status(), `${method} ${path} response status`).toBeGreaterThanOrEqual(200);
@@ -158,7 +169,7 @@ export function collectApiStatuses(page: Page, paths: readonly ApiPath[]): ApiSt
 }
 
 export async function responseData(response: Response) {
-  const raw = await response.json().catch(() => undefined);
+  const raw = await response.json();
   return unwrap(raw);
 }
 

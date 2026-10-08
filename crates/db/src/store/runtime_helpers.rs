@@ -93,6 +93,10 @@ pub(crate) fn to_u64(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
 }
 
+pub(crate) fn to_traffic_limit(value: i64) -> u64 {
+    if value == -1 { u64::MAX } else { to_u64(value) }
+}
+
 pub(crate) fn to_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
